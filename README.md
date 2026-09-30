@@ -67,6 +67,7 @@ to check move generation against known totals and to time the library.
 build/perft 3                      # depths 1 to 3 from the starting position
 build/perft -m "e2 e8 e3h" 2       # play these moves first
 build/perft -d 2                   # divide: the depth 2 total, split by first move
+build/perft -u 4                   # apply the generated moves without validating them again
 ```
 
 A line that ends in a win before the full depth counts nothing. The last ply

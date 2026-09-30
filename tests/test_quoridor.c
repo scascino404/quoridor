@@ -404,6 +404,57 @@ static void test_undo(void)
     }
 }
 
+/* Number of legal moves in g that qr_apply_unchecked handles exactly like
+ * qr_apply_move, and that qr_undo_move then takes back byte for byte. */
+static int count_unchecked_agree(const qr_game *g, int *n)
+{
+    qr_move moves[QR_MAX_MOVES];
+    qr_game checked, unchecked;
+    int i, agree = 0;
+
+    *n = qr_legal_moves(g, moves);
+    for (i = 0; i < *n; i++) {
+        checked = *g;
+        unchecked = *g;
+        if (qr_apply_move(&checked, &moves[i]) != QR_OK)
+            continue;
+        qr_apply_unchecked(&unchecked, &moves[i]);
+        if (memcmp(&checked, &unchecked, sizeof checked) != 0)
+            continue;
+        qr_undo_move(&unchecked, &moves[i], g->pawn[g->to_move]);
+        if (memcmp(&unchecked, g, sizeof unchecked) == 0)
+            agree++;
+    }
+    return agree;
+}
+
+static void test_apply_unchecked(void)
+{
+    qr_game g;
+    int n;
+
+    qr_game_init(&g);
+    CHECK(count_unchecked_agree(&g, &n) == n && n == 131);
+
+    /* walls on the board, a jump available, player 1 to move */
+    CHECK(play(&g, "e2") == QR_OK);
+    CHECK(play(&g, "e8") == QR_OK);
+    CHECK(play(&g, "e3") == QR_OK);
+    CHECK(play(&g, "e7") == QR_OK);
+    CHECK(play(&g, "e4") == QR_OK);
+    CHECK(play(&g, "e6") == QR_OK);
+    CHECK(play(&g, "e6h") == QR_OK);
+    CHECK(play(&g, "d4v") == QR_OK);
+    CHECK(play(&g, "e5") == QR_OK);
+    CHECK(count_unchecked_agree(&g, &n) == n && n > 0);
+
+    /* a winning move among them */
+    qr_game_init(&g);
+    g.pawn[0] = sq("e8");
+    g.pawn[1] = sq("a5");
+    CHECK(count_unchecked_agree(&g, &n) == n && n > 0);
+}
+
 static void test_legal_moves_agree_with_check(void)
 {
     qr_game g;
@@ -475,6 +526,7 @@ int main(void)
     test_failed_apply_leaves_state();
     test_sync();
     test_undo();
+    test_apply_unchecked();
     test_legal_moves_agree_with_check();
     test_notation();
 

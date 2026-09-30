@@ -665,40 +665,46 @@ int qr_legal_moves(const qr_game *g, qr_move out[QR_MAX_MOVES])
 qr_status qr_apply_move(qr_game *g, const qr_move *m)
 {
     qr_status st;
-    int c, r;
+    int c = m->pos.col, r = m->pos.row;
 
     if (m->type != QR_MOVE_WALL) {
         st = qr_check_move(g, m);
         if (st != QR_OK)
             return st;
+    } else {
+        /* A wall is tried out in the game's own masks, and its steps are
+         * opened again if it leaves a player without a path. */
+        st = wall_fits(g, c, r, m->orient);
+        if (st != QR_OK)
+            return st;
+        masks_block(&g->masks, c, r, m->orient);
+        if (!paths_exist(&g->masks, g)) {
+            masks_reopen(&g->masks, c, m->orient);
+            return QR_ERR_WALL_BLOCKS_PATH;
+        }
+    }
+    qr_apply_unchecked(g, m);
+    return QR_OK;
+}
+
+void qr_apply_unchecked(qr_game *g, const qr_move *m)
+{
+    int c = m->pos.col, r = m->pos.row;
+
+    if (m->type == QR_MOVE_PAWN) {
         g->pawn[g->to_move] = m->pos;
         if (m->pos.row == qr_goal_row(g->to_move))
             g->winner = g->to_move;
-        g->to_move = 1 - g->to_move;
-        return QR_OK;
+    } else {
+        masks_block(&g->masks, c, r, m->orient);
+        if (m->orient == QR_WALL_H)
+            g->masks.h[c + 1] |= 1u << r;
+        else
+            g->masks.v[c] |= 1u << r;
+        g->walls[c][r] = m->orient;
+        g->walls_left[g->to_move]--;
     }
-
-    /* A wall is tried out in the game's own masks, and its steps are
-     * opened again if it leaves a player without a path. */
-    c = m->pos.col;
-    r = m->pos.row;
-    st = wall_fits(g, c, r, m->orient);
-    if (st != QR_OK)
-        return st;
-    masks_block(&g->masks, c, r, m->orient);
-    if (!paths_exist(&g->masks, g)) {
-        masks_reopen(&g->masks, c, m->orient);
-        return QR_ERR_WALL_BLOCKS_PATH;
-    }
-
-    if (m->orient == QR_WALL_H)
-        g->masks.h[c + 1] |= 1u << r;
-    else
-        g->masks.v[c] |= 1u << r;
-    g->walls[c][r] = m->orient;
-    g->walls_left[g->to_move]--;
     g->to_move = 1 - g->to_move;
-    return QR_OK;
 }
 
 void qr_undo_move(qr_game *g, const qr_move *m, qr_pos from)

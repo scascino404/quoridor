@@ -38,8 +38,9 @@ typedef struct {
 } qr_move;
 
 /* Derived from walls[][]: one mask per column, bit r = row r. Kept up to
- * date by qr_game_init, qr_apply_move and qr_undo_move. After writing
- * walls[][] directly, call qr_game_sync before any other qr_* function. */
+ * date by qr_game_init, qr_apply_move, qr_apply_unchecked and qr_undo_move.
+ * After writing walls[][] directly, call qr_game_sync before any other
+ * qr_* function. */
 typedef struct {
     unsigned h[QR_WALL_GRID + 2];      /* H anchors, column c at h[c + 1] */
     unsigned v[QR_WALL_GRID];          /* V anchors */
@@ -90,9 +91,15 @@ int         qr_legal_moves(const qr_game *g, qr_move out[QR_MAX_MOVES]);
 
 /* Mutation: validates first; on error g is left unchanged. */
 qr_status   qr_apply_move(qr_game *g, const qr_move *m);
+/* Applies m without checking it. m must be legal in g: a move that
+ * qr_legal_moves listed or qr_check_move accepted for this position. With
+ * any other move the game is left in an undefined state. Undone with
+ * qr_undo_move like any move. */
+void        qr_apply_unchecked(qr_game *g, const qr_move *m);
 /* Reverts m, the last move applied to g. `from` is the square the mover's
  * pawn stood on before the move (ignored for walls). m must be the move
- * most recently applied with qr_apply_move; nothing is validated. */
+ * most recently applied with qr_apply_move or qr_apply_unchecked; nothing
+ * is validated. */
 void        qr_undo_move(qr_game *g, const qr_move *m, qr_pos from);
 
 /* Notation: "e2" (pawn), "e3h" / "e3v" (wall). Both return 0 on success,

@@ -3,7 +3,7 @@
  */
 #include "perft.h"
 
-unsigned long perft(qr_game *g, int depth)
+static unsigned long count(qr_game *g, int depth, int checked)
 {
     qr_move moves[QR_MAX_MOVES];
     qr_pos from;
@@ -19,12 +19,25 @@ unsigned long perft(qr_game *g, int depth)
 
     for (i = 0; i < n; i++) {
         from = g->pawn[g->to_move];
-        /* A generated move that is then rejected is a library bug; counting
-         * nothing for it makes the total come out wrong. */
-        if (qr_apply_move(g, &moves[i]) != QR_OK)
+        if (!checked) {
+            qr_apply_unchecked(g, &moves[i]);
+        } else if (qr_apply_move(g, &moves[i]) != QR_OK) {
+            /* A generated move that is then rejected is a library bug;
+             * counting nothing for it makes the total come out wrong. */
             continue;
-        nodes += perft(g, depth - 1);
+        }
+        nodes += count(g, depth - 1, checked);
         qr_undo_move(g, &moves[i], from);
     }
     return nodes;
+}
+
+unsigned long perft(qr_game *g, int depth)
+{
+    return count(g, depth, 1);
+}
+
+unsigned long perft_unchecked(qr_game *g, int depth)
+{
+    return count(g, depth, 0);
 }

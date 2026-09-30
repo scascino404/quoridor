@@ -170,6 +170,37 @@ static void test_leaves_game_unchanged(void)
     CHECK(memcmp(&g, &before, sizeof before) == 0);
 }
 
+/* Applying the generated moves unchecked gives the same totals. */
+static void test_unchecked(void)
+{
+    static const char *const moves[] = {
+        "f2h", "e8", "b5h", "d8", "a3v", "h4h", "g3v", "d7", "h6h", "d8",
+        "f1", "b6v", "d5h", "g5v", "d6h", "f5h", "g1", "c7v", "a5v", "d7",
+        "b2h", "b4h", NULL
+    };
+    qr_game g, before;
+
+    qr_game_init(&g);
+    before = g;
+    CHECK(perft_unchecked(&g, 0) == 1UL);
+    CHECK(perft_unchecked(&g, 1) == 131UL);
+    CHECK(perft_unchecked(&g, 3) == 2062264UL);
+    CHECK(memcmp(&g, &before, sizeof before) == 0);
+
+    setup(&g, moves);
+    before = g;
+    CHECK(perft_unchecked(&g, 4) == perft(&g, 4));
+    CHECK(memcmp(&g, &before, sizeof before) == 0);
+
+    /* a tree with winning moves in it */
+    qr_game_init(&g);
+    g.pawn[0] = sq("e8");
+    g.pawn[1] = sq("e2");
+    before = g;
+    CHECK(perft_unchecked(&g, 3) == perft(&g, 3));
+    CHECK(memcmp(&g, &before, sizeof before) == 0);
+}
+
 int main(void)
 {
     test_depth_zero();
@@ -179,6 +210,7 @@ int main(void)
     test_crowded_positions();
     test_won_lines_end_early();
     test_leaves_game_unchanged();
+    test_unchecked();
 
     if (failures) {
         fprintf(stderr, "%d of %d checks FAILED\n", failures, checks);

@@ -16,4 +16,8 @@
  * undone on g itself, which is left as it was found. */
 unsigned long perft(qr_game *g, int depth);
 
+/* The same count, with moves applied by qr_apply_unchecked: the generated
+ * moves are trusted instead of being validated again. */
+unsigned long perft_unchecked(qr_game *g, int depth);
+
 #endif /* PERFT_H */

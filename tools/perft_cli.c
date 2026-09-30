@@ -15,12 +15,14 @@
 static void usage(const char *prog)
 {
     fprintf(stderr,
-            "usage: %s [-d] [-m MOVES] DEPTH\n"
+            "usage: %s [-d] [-u] [-m MOVES] DEPTH\n"
             "\n"
             "Counts the move sequences of each length from 1 to DEPTH.\n"
             "\n"
             "  -d        divide: list each move with the number of sequences\n"
             "            of length DEPTH that start with it\n"
+            "  -u        unchecked: apply the generated moves without\n"
+            "            validating them again\n"
             "  -m MOVES  play these moves from the starting position first,\n"
             "            e.g. -m \"e2 e8 e3h\"\n",
             prog);
@@ -88,8 +90,10 @@ static void rate_str(char buf[32], unsigned long nodes, double secs)
         strcpy(buf, "-");
 }
 
+typedef unsigned long (*perft_fn)(qr_game *g, int depth);
+
 /* One row per depth from 1 to max_depth. */
-static void run_table(qr_game *g, int max_depth)
+static void run_table(qr_game *g, int max_depth, perft_fn count)
 {
     unsigned long nodes;
     clock_t start;
@@ -100,7 +104,7 @@ static void run_table(qr_game *g, int max_depth)
     printf("%5s %16s %10s %14s\n", "depth", "nodes", "time(s)", "nodes/s");
     for (d = 1; d <= max_depth; d++) {
         start = clock();
-        nodes = perft(g, d);
+        nodes = count(g, d);
         secs = seconds_since(start);
         rate_str(rate, nodes, secs);
         printf("%5d %16lu %10.3f %14s\n", d, nodes, secs, rate);
@@ -109,7 +113,7 @@ static void run_table(qr_game *g, int max_depth)
 }
 
 /* Each move with its share of the depth-ply total, in generation order. */
-static void run_divide(qr_game *g, int depth)
+static void run_divide(qr_game *g, int depth, perft_fn count)
 {
     qr_move moves[QR_MAX_MOVES];
     qr_pos from;
@@ -128,7 +132,7 @@ static void run_divide(qr_game *g, int depth)
             printf("%-3s  rejected by qr_apply_move\n", buf);
             continue;
         }
-        nodes = perft(g, depth - 1);
+        nodes = count(g, depth - 1);
         qr_undo_move(g, &moves[i], from);
         total += nodes;
         printf("%-3s %16lu\n", buf, nodes);
@@ -147,11 +151,13 @@ int main(int argc, char *argv[])
 {
     qr_game g;
     const char *moves = NULL, *depth_arg = NULL;
-    int divide = 0, depth, i;
+    int divide = 0, unchecked = 0, depth, i;
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-d") == 0) {
             divide = 1;
+        } else if (strcmp(argv[i], "-u") == 0) {
+            unchecked = 1;
         } else if (strcmp(argv[i], "-m") == 0 && i + 1 < argc) {
             moves = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0) {
@@ -178,8 +184,8 @@ int main(int argc, char *argv[])
         return 2;
 
     if (divide)
-        run_divide(&g, depth);
+        run_divide(&g, depth, unchecked ? perft_unchecked : perft);
     else
-        run_table(&g, depth);
+        run_table(&g, depth, unchecked ? perft_unchecked : perft);
     return 0;
 }
