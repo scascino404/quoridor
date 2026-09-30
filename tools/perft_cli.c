@@ -151,13 +151,14 @@ int main(int argc, char *argv[])
 {
     qr_game g;
     const char *moves = NULL, *depth_arg = NULL;
-    int divide = 0, unchecked = 0, depth, i;
+    perft_fn count = perft;
+    int divide = 0, depth, i;
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-d") == 0) {
             divide = 1;
         } else if (strcmp(argv[i], "-u") == 0) {
-            unchecked = 1;
+            count = perft_unchecked;
         } else if (strcmp(argv[i], "-m") == 0 && i + 1 < argc) {
             moves = argv[++i];
         } else if (strcmp(argv[i], "-h") == 0) {
@@ -184,8 +185,8 @@ int main(int argc, char *argv[])
         return 2;
 
     if (divide)
-        run_divide(&g, depth, unchecked ? perft_unchecked : perft);
+        run_divide(&g, depth, count);
     else
-        run_table(&g, depth, unchecked ? perft_unchecked : perft);
+        run_table(&g, depth, count);
     return 0;
 }

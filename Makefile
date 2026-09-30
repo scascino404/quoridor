@@ -54,7 +54,7 @@ $(BUILD)/font.o: src/font.c src/font.h | $(BUILD)
 	$(CC) $(CFLAGS) $(SDL_CFLAGS) -c $< -o $@
 
 $(GAME): $(UI_OBJS) $(AI_OBJS) $(LIB_OBJS)
-	$(CC) $(UI_OBJS) $(AI_OBJS) $(LIB_OBJS) $(SDL_LIBS) -lm -o $@
+	$(CC) $^ $(SDL_LIBS) -lm -o $@
 
 # Tests: no SDL.
 $(BUILD)/test_quoridor.o: tests/test_quoridor.c tests/check.h src/quoridor.h | $(BUILD)
