@@ -6,12 +6,12 @@
  * wrapped in a struct so that it cannot be accessed by accident without
  * going through these functions.
  */
-#ifndef QR_ATOMICS_H
-#define QR_ATOMICS_H
+#ifndef ATOMICS_H
+#define ATOMICS_H
 
 typedef struct { int value; } qr_atomic_int;
 
 int  qr_atomic_load(const qr_atomic_int *a);
 void qr_atomic_store(qr_atomic_int *a, int value);
 
-#endif /* QR_ATOMICS_H */
+#endif /* ATOMICS_H */

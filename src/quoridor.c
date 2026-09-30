@@ -104,7 +104,7 @@ typedef struct {
     unsigned v[QR_WALL_GRID];
 } slot_set;
 
-static const slot_set no_slots = { { 0 }, { 0 } };
+static const slot_set NO_SLOTS = { { 0 }, { 0 } };
 
 /* qr_game_sync reads a column of eight wall slots as two bits each,
  * horizontal and vertical. */
@@ -245,7 +245,7 @@ static void path_cuts(const qr_masks *m, const flood_trace *trace,
     unsigned up, rows;
     int r = goal_row, lo;
 
-    *cut = no_slots;
+    *cut = NO_SLOTS;
     for (;;) {
         /* The path came into this column on an entry square that r can be
          * reached from: the nearest one below it, or else above it. */
@@ -383,17 +383,18 @@ static int paths_exist(const qr_masks *m, const qr_game *g)
     return 1;
 }
 
-qr_status qr_check_wall(const qr_game *g, qr_pos anchor, qr_orient o)
+/* Whether a wall at (c, r) is legal, tried out on a copy of the masks. */
+static qr_status check_wall(const qr_game *g, int c, int r, qr_orient o)
 {
     qr_masks m;
     qr_status st;
 
-    st = wall_fits(g, anchor.col, anchor.row, o);
+    st = wall_fits(g, c, r, o);
     if (st != QR_OK)
         return st;
 
     m = g->masks;
-    masks_block(&m, anchor.col, anchor.row, o);
+    masks_block(&m, c, r, o);
     return paths_exist(&m, g) ? QR_OK : QR_ERR_WALL_BLOCKS_PATH;
 }
 
@@ -406,7 +407,7 @@ qr_status qr_check_move(const qr_game *g, const qr_move *m)
         return QR_ERR_GAME_OVER;
 
     if (m->type == QR_MOVE_WALL)
-        return qr_check_wall(g, m->pos, m->orient);
+        return check_wall(g, m->pos.col, m->pos.row, m->orient);
 
     if (m->type == QR_MOVE_PAWN) {
         n = qr_pawn_moves(g, dest);
@@ -435,7 +436,7 @@ typedef struct {
 #define INNER_LINE(x) \
     0, POINT(x, 1), POINT(x, 2), POINT(x, 3), POINT(x, 4), \
     POINT(x, 5), POINT(x, 6), POINT(x, 7), POINT(x, 8), 0
-static const point_sets no_walls = { {
+static const point_sets NO_WALLS = { {
     EDGE_LINE, INNER_LINE(1), INNER_LINE(2), INNER_LINE(3), INNER_LINE(4),
     INNER_LINE(5), INNER_LINE(6), INNER_LINE(7), INNER_LINE(8), EDGE_LINE
 } };
@@ -564,7 +565,7 @@ static void legal_walls(const qr_game *g, slot_set *ok)
     any_needed = 0;
     for (p = 0; p < QR_NUM_PLAYERS; p++) {
         if (!can_reach(m, g->pawn[p], 1u << qr_goal_row(p), &trace)) {
-            *ok = no_slots;
+            *ok = NO_SLOTS;
             return;
         }
         if (!any_risky)
@@ -583,7 +584,7 @@ static void legal_walls(const qr_game *g, slot_set *ok)
      * only if the wall really closes a loop. Walls are tried out on a copy
      * of the masks. */
     tried = *m;
-    sets = no_walls;
+    sets = NO_WALLS;
     for (c = 0; c < QR_WALL_GRID; c++) {
         for (r = 0; (m->h[c + 1] | m->v[c]) >> r; r++) {
             if (m->h[c + 1] >> r & 1)
@@ -614,7 +615,7 @@ static void legal_walls(const qr_game *g, slot_set *ok)
 #define COLUMN_MOVES(c) \
     SLOT_MOVES(c, 0), SLOT_MOVES(c, 1), SLOT_MOVES(c, 2), SLOT_MOVES(c, 3), \
     SLOT_MOVES(c, 4), SLOT_MOVES(c, 5), SLOT_MOVES(c, 6), SLOT_MOVES(c, 7)
-static const qr_move wall_moves[QR_WALL_GRID][2 * QR_WALL_GRID] = {
+static const qr_move WALL_MOVES[QR_WALL_GRID][2 * QR_WALL_GRID] = {
     { COLUMN_MOVES(0) }, { COLUMN_MOVES(1) }, { COLUMN_MOVES(2) },
     { COLUMN_MOVES(3) }, { COLUMN_MOVES(4) }, { COLUMN_MOVES(5) },
     { COLUMN_MOVES(6) }, { COLUMN_MOVES(7) }
@@ -643,9 +644,9 @@ int qr_legal_moves(const qr_game *g, qr_move out[QR_MAX_MOVES])
 
     legal_walls(g, &ok);
     for (c = 0; c < QR_WALL_GRID; c++) {
-        wall = wall_moves[c];
+        wall = WALL_MOVES[c];
         if ((ok.h[c + 1] & ok.v[c]) == SLOT_BITS) {
-            memcpy(&out[n], wall, sizeof wall_moves[c]);
+            memcpy(&out[n], wall, sizeof WALL_MOVES[c]);
             n += 2 * QR_WALL_GRID;
             continue;
         }

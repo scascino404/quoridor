@@ -5,8 +5,8 @@
  * blocks until it has an answer. A caller that wants to stay responsive runs
  * it on another thread and uses qr_ai_stop to abort it.
  */
-#ifndef QR_AI_H
-#define QR_AI_H
+#ifndef AI_H
+#define AI_H
 
 #include "atomics.h"
 #include "quoridor.h"
@@ -40,4 +40,4 @@ int  qr_ai_choose_move(qr_ai *ai, const qr_game *g, qr_move *out);
 void qr_ai_stop(qr_ai *ai);
 void qr_ai_clear_stop(qr_ai *ai);
 
-#endif /* QR_AI_H */
+#endif /* AI_H */

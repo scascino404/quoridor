@@ -83,7 +83,6 @@ int         qr_shortest_path(const qr_game *g, int player);
 /* Legal pawn destinations for the player to move (including jumps).
  * Returns the count. */
 int         qr_pawn_moves(const qr_game *g, qr_pos out[QR_MAX_PAWN_MOVES]);
-qr_status   qr_check_wall(const qr_game *g, qr_pos anchor, qr_orient o);
 qr_status   qr_check_move(const qr_game *g, const qr_move *m);
 /* All legal moves for the player to move: pawn moves first, then walls.
  * Returns the count (0 if the game is over). */
