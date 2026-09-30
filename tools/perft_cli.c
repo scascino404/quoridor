@@ -89,7 +89,7 @@ static void rate_str(char buf[32], unsigned long nodes, double secs)
 }
 
 /* One row per depth from 1 to max_depth. */
-static void run_table(const qr_game *g, int max_depth)
+static void run_table(qr_game *g, int max_depth)
 {
     unsigned long nodes;
     clock_t start;
@@ -109,10 +109,10 @@ static void run_table(const qr_game *g, int max_depth)
 }
 
 /* Each move with its share of the depth-ply total, in generation order. */
-static void run_divide(const qr_game *g, int depth)
+static void run_divide(qr_game *g, int depth)
 {
     qr_move moves[QR_MAX_MOVES];
-    qr_game next;
+    qr_pos from;
     char buf[4], rate[32];
     unsigned long nodes, total = 0;
     clock_t start;
@@ -122,13 +122,14 @@ static void run_divide(const qr_game *g, int depth)
     start = clock();
     n = qr_legal_moves(g, moves);
     for (i = 0; i < n; i++) {
-        next = *g;
+        from = g->pawn[g->to_move];
         qr_move_to_str(&moves[i], buf);
-        if (qr_apply_move(&next, &moves[i]) != QR_OK) {
+        if (qr_apply_move(g, &moves[i]) != QR_OK) {
             printf("%-3s  rejected by qr_apply_move\n", buf);
             continue;
         }
-        nodes = perft(&next, depth - 1);
+        nodes = perft(g, depth - 1);
+        qr_undo_move(g, &moves[i], from);
         total += nodes;
         printf("%-3s %16lu\n", buf, nodes);
         fflush(stdout);

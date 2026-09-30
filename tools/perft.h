@@ -12,7 +12,8 @@
 
 /* Number of move sequences of exactly `depth` plies from g; 1 for depth 0.
  * A finished game has no moves, so lines that end early count nothing.
- * The last ply is counted without applying its moves. */
-unsigned long perft(const qr_game *g, int depth);
+ * The last ply is counted without applying its moves. Moves are made and
+ * undone on g itself, which is left as it was found. */
+unsigned long perft(qr_game *g, int depth);
 
 #endif /* PERFT_H */

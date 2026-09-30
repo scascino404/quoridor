@@ -76,6 +76,10 @@ int         qr_legal_moves(const qr_game *g, qr_move out[QR_MAX_MOVES]);
 
 /* Mutation: validates first; on error g is left unchanged. */
 qr_status   qr_apply_move(qr_game *g, const qr_move *m);
+/* Reverts m, the last move applied to g. `from` is the square the mover's
+ * pawn stood on before the move (ignored for walls). m must be the move
+ * most recently applied with qr_apply_move; nothing is validated. */
+void        qr_undo_move(qr_game *g, const qr_move *m, qr_pos from);
 
 /* Notation: "e2" (pawn), "e3h" / "e3v" (wall). Both return 0 on success,
  * -1 on malformed input. */

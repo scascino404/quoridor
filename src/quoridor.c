@@ -263,6 +263,18 @@ qr_status qr_apply_move(qr_game *g, const qr_move *m)
     return QR_OK;
 }
 
+void qr_undo_move(qr_game *g, const qr_move *m, qr_pos from)
+{
+    g->to_move = 1 - g->to_move;
+    if (m->type == QR_MOVE_PAWN) {
+        g->pawn[g->to_move] = from;
+        g->winner = -1;
+    } else {
+        g->walls[m->pos.col][m->pos.row] = QR_WALL_NONE;
+        g->walls_left[g->to_move]++;
+    }
+}
+
 int qr_move_to_str(const qr_move *m, char buf[4])
 {
     if (m->type == QR_MOVE_PAWN) {

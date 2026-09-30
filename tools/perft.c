@@ -3,10 +3,10 @@
  */
 #include "perft.h"
 
-unsigned long perft(const qr_game *g, int depth)
+unsigned long perft(qr_game *g, int depth)
 {
     qr_move moves[QR_MAX_MOVES];
-    qr_game next;
+    qr_pos from;
     unsigned long nodes = 0;
     int n, i;
 
@@ -18,12 +18,13 @@ unsigned long perft(const qr_game *g, int depth)
         return (unsigned long)n;
 
     for (i = 0; i < n; i++) {
-        next = *g;
+        from = g->pawn[g->to_move];
         /* A generated move that is then rejected is a library bug; counting
          * nothing for it makes the total come out wrong. */
-        if (qr_apply_move(&next, &moves[i]) != QR_OK)
+        if (qr_apply_move(g, &moves[i]) != QR_OK)
             continue;
-        nodes += perft(&next, depth - 1);
+        nodes += perft(g, depth - 1);
+        qr_undo_move(g, &moves[i], from);
     }
     return nodes;
 }

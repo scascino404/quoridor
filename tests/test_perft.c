@@ -7,6 +7,7 @@
  * library's internals cannot alter it unnoticed.
  */
 #include <stdio.h>
+#include <string.h>
 
 #include "perft.h"
 
@@ -116,6 +117,27 @@ static void test_won_lines_end_early(void)
     CHECK(perft(&g, 3) == 0UL);
 }
 
+static void test_leaves_game_unchanged(void)
+{
+    static const char *const moves[] = {
+        "e2", "e8", "e3", "e7", "e4", "e6", "e6h", "d4v", "e5", NULL
+    };
+    qr_game g, before;
+
+    setup(&g, moves);
+    before = g;
+    perft(&g, 2);
+    CHECK(memcmp(&g, &before, sizeof before) == 0);
+
+    /* a tree with winning moves in it */
+    qr_game_init(&g);
+    g.pawn[0] = sq("e8");
+    g.pawn[1] = sq("e2");
+    before = g;
+    perft(&g, 3);
+    CHECK(memcmp(&g, &before, sizeof before) == 0);
+}
+
 int main(void)
 {
     test_depth_zero();
@@ -123,6 +145,7 @@ int main(void)
     test_jump_position();
     test_walled_position();
     test_won_lines_end_early();
+    test_leaves_game_unchanged();
 
     if (failures) {
         fprintf(stderr, "%d of %d checks FAILED\n", failures, checks);

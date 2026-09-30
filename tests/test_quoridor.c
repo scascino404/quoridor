@@ -290,6 +290,70 @@ static void test_failed_apply_leaves_state(void)
     CHECK(memcmp(&before, &g, sizeof g) == 0);
 }
 
+/* Applies s and undoes it again; g must come back byte for byte. */
+static void check_undo(qr_game *g, const char *s)
+{
+    qr_game before = *g;
+    qr_move m = mv(s);
+    qr_pos from = g->pawn[g->to_move];
+
+    CHECK(qr_apply_move(g, &m) == QR_OK);
+    CHECK(memcmp(g, &before, sizeof before) != 0);
+    qr_undo_move(g, &m, from);
+    CHECK(memcmp(g, &before, sizeof before) == 0);
+}
+
+static void test_undo(void)
+{
+    qr_game g;
+
+    qr_game_init(&g);
+    check_undo(&g, "e2");                /* step */
+    check_undo(&g, "e3h");               /* wall */
+    CHECK(play(&g, "e2") == QR_OK);
+    check_undo(&g, "c7v");               /* wall by player 1 */
+    check_undo(&g, "e8");                /* step by player 1 */
+
+    /* straight jump */
+    qr_game_init(&g);
+    g.pawn[0] = sq("e5");
+    g.pawn[1] = sq("e6");
+    check_undo(&g, "e7");
+
+    /* diagonal jump: wall behind the jumped pawn */
+    CHECK(play(&g, "a1h") == QR_OK);
+    CHECK(play(&g, "e6h") == QR_OK);
+    g.to_move = 0;
+    check_undo(&g, "d6");
+
+    /* winning move: the winner is cleared again */
+    qr_game_init(&g);
+    g.pawn[0] = sq("e8");
+    g.pawn[1] = sq("a5");
+    check_undo(&g, "e9");
+    CHECK(g.winner == -1);
+
+    /* undoing several moves in reverse order */
+    {
+        qr_game start;
+        qr_move m1 = mv("e2"), m2 = mv("d8v"), m3 = mv("e3");
+        qr_pos f1, f2, f3;
+
+        qr_game_init(&g);
+        start = g;
+        f1 = g.pawn[g.to_move];
+        CHECK(qr_apply_move(&g, &m1) == QR_OK);
+        f2 = g.pawn[g.to_move];
+        CHECK(qr_apply_move(&g, &m2) == QR_OK);
+        f3 = g.pawn[g.to_move];
+        CHECK(qr_apply_move(&g, &m3) == QR_OK);
+        qr_undo_move(&g, &m3, f3);
+        qr_undo_move(&g, &m2, f2);
+        qr_undo_move(&g, &m1, f1);
+        CHECK(memcmp(&g, &start, sizeof start) == 0);
+    }
+}
+
 static void test_legal_moves_agree_with_check(void)
 {
     qr_game g;
@@ -359,6 +423,7 @@ int main(void)
     test_win();
     test_no_walls_left();
     test_failed_apply_leaves_state();
+    test_undo();
     test_legal_moves_agree_with_check();
     test_notation();
 
