@@ -2,7 +2,8 @@
  * quoridor.h - Quoridor game library (rules, legality, notation).
  *
  * Pure C89, no I/O and no SDL. The whole game state is a plain struct that
- * can be copied by value.
+ * can be copied by value. Its fields may be written directly to set up a
+ * position, but after writing walls[][] call qr_game_sync.
  *
  * Coordinates: squares are (col, row) with col 0..8 = files a..i and
  * row 0..8 = ranks 1..9. Player 0 starts on e1 and must reach rank 9;
@@ -36,12 +37,23 @@ typedef struct {
     qr_orient    orient;  /* walls only; QR_WALL_NONE for pawn moves */
 } qr_move;
 
+/* Derived from walls[][]: one mask per column, bit r = row r. Kept up to
+ * date by qr_game_init, qr_apply_move and qr_undo_move. After writing
+ * walls[][] directly, call qr_game_sync before any other qr_* function. */
+typedef struct {
+    unsigned h[QR_WALL_GRID + 2];      /* H anchors, column c at h[c + 1] */
+    unsigned v[QR_WALL_GRID];          /* V anchors */
+    unsigned up[QR_BOARD_SIZE];        /* open steps (c, r) -> (c, r + 1) */
+    unsigned side[QR_BOARD_SIZE + 1];  /* open steps between columns x - 1, x */
+} qr_masks;
+
 typedef struct {
     qr_pos    pawn[QR_NUM_PLAYERS];
     int       walls_left[QR_NUM_PLAYERS];
     qr_orient walls[QR_WALL_GRID][QR_WALL_GRID];  /* indexed [col][row] */
     int       to_move;   /* 0 or 1 */
     int       winner;    /* -1 while the game is in progress */
+    qr_masks  masks;
 } qr_game;
 
 typedef enum {
@@ -56,6 +68,8 @@ typedef enum {
 } qr_status;
 
 void        qr_game_init(qr_game *g);
+/* Rebuilds g->masks from g->walls. */
+void        qr_game_sync(qr_game *g);
 
 /* Queries */
 

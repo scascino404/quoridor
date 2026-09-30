@@ -85,6 +85,7 @@ static void test_evaluate(void)
     g.pawn[0] = sq("a2");
     CHECK(qr_ai_evaluate(&g, 0) == 1);
     g.walls[0][1] = QR_WALL_H;              /* a2h */
+    qr_game_sync(&g);
     CHECK(qr_ai_evaluate(&g, 0) == -1);
     CHECK(qr_ai_evaluate(&g, 1) == 1);
 

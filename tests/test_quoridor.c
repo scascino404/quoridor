@@ -197,6 +197,7 @@ static void test_straight_jump(void)
 
     /* A wall between the pawns prevents the jump entirely. */
     g.walls[4][3] = QR_WALL_H;              /* e4h: between e4/e5 and f4/f5 */
+    qr_game_sync(&g);
     CHECK(check(&g, "e6") == QR_ERR_BAD_PAWN_MOVE);
     CHECK(check(&g, "e5") == QR_ERR_BAD_PAWN_MOVE);
     CHECK(count_pawn_moves(&g) == 3);
@@ -210,6 +211,7 @@ static void test_diagonal_jump_wall_behind(void)
     g.pawn[0] = sq("e4");
     g.pawn[1] = sq("e5");
     g.walls[4][4] = QR_WALL_H;              /* e5h: behind the opponent */
+    qr_game_sync(&g);
     CHECK(check(&g, "e6") == QR_ERR_BAD_PAWN_MOVE);
     CHECK(check(&g, "d5") == QR_OK);
     CHECK(check(&g, "f5") == QR_OK);
@@ -217,6 +219,7 @@ static void test_diagonal_jump_wall_behind(void)
 
     /* Block one diagonal with a vertical wall between d5 and e5. */
     g.walls[3][4] = QR_WALL_V;              /* d5v: between d/e on ranks 5-6 */
+    qr_game_sync(&g);
     CHECK(check(&g, "d5") == QR_ERR_BAD_PAWN_MOVE);
     CHECK(check(&g, "f5") == QR_OK);
     CHECK(count_pawn_moves(&g) == 4);
@@ -288,6 +291,53 @@ static void test_failed_apply_leaves_state(void)
     CHECK(play(&g, "e1v") == QR_ERR_WALL_CROSSES);
     CHECK(play(&g, "e7") == QR_ERR_BAD_PAWN_MOVE);
     CHECK(memcmp(&before, &g, sizeof g) == 0);
+
+    /* a wall turned down for blocking a path, of either orientation */
+    qr_game_init(&g);
+    CHECK(play(&g, "d1h") == QR_OK);
+    CHECK(play(&g, "c1v") == QR_OK);
+    before = g;
+    CHECK(play(&g, "e1v") == QR_ERR_WALL_BLOCKS_PATH);
+    CHECK(memcmp(&before, &g, sizeof g) == 0);
+
+    qr_game_init(&g);
+    CHECK(play(&g, "d1v") == QR_OK);
+    CHECK(play(&g, "e1v") == QR_OK);
+    before = g;
+    CHECK(play(&g, "e2h") == QR_ERR_WALL_BLOCKS_PATH);
+    CHECK(memcmp(&before, &g, sizeof g) == 0);
+}
+
+/* Walls written into the struct by hand count once qr_game_sync has run. */
+static void test_sync(void)
+{
+    qr_game g, played;
+
+    /* the same position by legal moves and by hand */
+    qr_game_init(&played);
+    CHECK(play(&played, "e3h") == QR_OK);
+    CHECK(play(&played, "c7v") == QR_OK);
+
+    qr_game_init(&g);
+    g.walls[4][2] = QR_WALL_H;              /* e3h */
+    g.walls[2][6] = QR_WALL_V;              /* c7v */
+    g.walls_left[0] = g.walls_left[1] = 9;
+    CHECK(memcmp(&g, &played, sizeof g) != 0);
+    qr_game_sync(&g);
+    CHECK(memcmp(&g, &played, sizeof g) == 0);
+
+    /* taking a wall away by hand */
+    g.walls[4][2] = QR_WALL_NONE;
+    qr_game_sync(&g);
+    CHECK(!qr_is_blocked(&g, sq("e3"), sq("e4")));
+    CHECK(qr_is_blocked(&g, sq("c7"), sq("d7")));
+    CHECK(check(&g, "e3h") == QR_OK);
+    CHECK(check(&g, "c7v") == QR_ERR_WALL_OVERLAP);
+
+    /* syncing a game that is in step changes nothing */
+    played = g;
+    qr_game_sync(&g);
+    CHECK(memcmp(&g, &played, sizeof g) == 0);
 }
 
 /* Applies s and undoes it again; g must come back byte for byte. */
@@ -423,6 +473,7 @@ int main(void)
     test_win();
     test_no_walls_left();
     test_failed_apply_leaves_state();
+    test_sync();
     test_undo();
     test_legal_moves_agree_with_check();
     test_notation();
