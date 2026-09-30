@@ -4,10 +4,16 @@
  * Screen layout (top to bottom): player 1 info row, board with rank labels
  * on the left and file labels below, player 0 info row, status line, help.
  * Row 0 (rank 1) is drawn at the bottom of the board.
+ *
+ * While an AI seat is to move, a worker thread searches a snapshot of the
+ * game and the board ignores the mouse. The worker's only contact with the
+ * main thread is the user event it posts when done; anything that makes the
+ * search pointless (undo, new game, seat change, quit) stops and joins it.
  */
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "font.h"
 #include "ui.h"
@@ -84,7 +90,7 @@ static SDL_Rect wall_rect(const ui_state *ui, qr_pos anchor, qr_orient o)
 
 static void ui_layout(ui_state *ui)
 {
-    int w, h, cell, board_px, label_h, gap, line_h, total, top;
+    int w, h, cell, board_px, label_h, gap, line_h, total, top, p, pad;
 
     SDL_GetRendererOutputSize(ui->renderer, &w, &h);
 
@@ -114,6 +120,37 @@ static void ui_layout(ui_state *ui)
     ui->bottom_info_y = ui->board_y + board_px + label_h;
     ui->status_y = ui->bottom_info_y + ui->info_h + gap;
     ui->help_y = ui->status_y + 2 * line_h;
+
+    /* Seat labels sit at the left of each info row; the clickable area is
+     * sized for the longer label so it does not move when toggled. */
+    pad = 2 * ui->text_scale;
+    for (p = 0; p < QR_NUM_PLAYERS; p++) {
+        ui->seat_rect[p].x = ui->board_x - pad;
+        ui->seat_rect[p].y = (p == 0 ? ui->bottom_info_y : ui->top_info_y)
+                             + ui->info_h / 2 - line_h / 2 - pad;
+        ui->seat_rect[p].w = font_text_width("HUMAN", ui->text_scale) + 2 * pad;
+        ui->seat_rect[p].h = line_h + 2 * pad;
+    }
+}
+
+/* The seat whose HUMAN/AI label contains the point, or -1. */
+static int seat_at(const ui_state *ui, int x, int y)
+{
+    const SDL_Rect *r;
+    int p;
+
+    for (p = 0; p < QR_NUM_PLAYERS; p++) {
+        r = &ui->seat_rect[p];
+        if (x >= r->x && x < r->x + r->w && y >= r->y && y < r->y + r->h)
+            return p;
+    }
+    return -1;
+}
+
+/* Nonzero while it is an AI seat's turn. */
+static int ai_to_move(const ui_state *ui)
+{
+    return ui->game.winner < 0 && ui->player_is_ai[ui->game.to_move];
 }
 
 /* Map a point (output pixels) to the move it would make: a square means a
@@ -195,6 +232,20 @@ static void fill_circle(SDL_Renderer *r, int cx, int cy, int radius, SDL_Color c
     }
 }
 
+static void draw_outline(SDL_Renderer *r, SDL_Rect rect, int thickness, SDL_Color c)
+{
+    int i;
+
+    set_color(r, c);
+    for (i = 0; i < thickness; i++) {
+        SDL_RenderDrawRect(r, &rect);
+        rect.x++;
+        rect.y++;
+        rect.w -= 2;
+        rect.h -= 2;
+    }
+}
+
 static void draw_text_centered(ui_state *ui, int cx, int y, const char *s, SDL_Color c)
 {
     set_color(ui->renderer, c);
@@ -207,8 +258,10 @@ static void draw_text_centered(ui_state *ui, int cx, int y, const char *s, SDL_C
 static void draw_board(ui_state *ui)
 {
     const qr_game *g = &ui->game;
+    const qr_game *prev;
+    const qr_move *last;
     qr_pos dest[QR_MAX_PAWN_MOVES];
-    int n = 0, i, p, c, r, board_px, half;
+    int n = 0, i, p, c, r, board_px, half, thick;
     SDL_Rect rect, frame;
     qr_pos pos;
 
@@ -234,7 +287,7 @@ static void draw_board(ui_state *ui)
         }
     }
 
-    if (g->winner < 0) {
+    if (g->winner < 0 && !ai_to_move(ui)) {
         n = qr_pawn_moves(g, dest);
         if (ui->hover_kind == UI_HOVER_SQUARE && ui->hover_status == QR_OK) {
             rect = square_rect(ui, ui->hover_move.pos);
@@ -250,6 +303,20 @@ static void draw_board(ui_state *ui)
             pos.row = r;
             rect = square_rect(ui, pos);
             SDL_RenderDrawRect(ui->renderer, &rect);
+        }
+    }
+
+    /* Last move, if it was a pawn move: outline the square it left (dim)
+     * and the one it reached, in the mover's colour. */
+    if (ui->history_len > 0) {
+        last = &ui->history_move[ui->history_len - 1];
+        prev = &ui->history[ui->history_len - 1];
+        if (last->type == QR_MOVE_PAWN) {
+            thick = ui->cell_px / 16 < 2 ? 2 : ui->cell_px / 16;
+            draw_outline(ui->renderer, square_rect(ui, prev->pawn[prev->to_move]),
+                         thick, PLAYER_HOVER[prev->to_move]);
+            draw_outline(ui->renderer, square_rect(ui, last->pos),
+                         thick, PLAYER_COL[prev->to_move]);
         }
     }
 
@@ -282,16 +349,26 @@ static void draw_labels(ui_state *ui)
 
 static void draw_walls(ui_state *ui)
 {
+    const qr_move *last = NULL;
     SDL_Rect rect;
     qr_pos a;
     qr_orient o;
 
-    set_color(ui->renderer, COL_WALL);
+    if (ui->history_len > 0 &&
+        ui->history_move[ui->history_len - 1].type == QR_MOVE_WALL)
+        last = &ui->history_move[ui->history_len - 1];
+
     for (a.col = 0; a.col < QR_WALL_GRID; a.col++) {
         for (a.row = 0; a.row < QR_WALL_GRID; a.row++) {
             o = ui->game.walls[a.col][a.row];
             if (o == QR_WALL_NONE)
                 continue;
+            /* the wall placed last is drawn in the mover's colour */
+            if (last && last->pos.col == a.col && last->pos.row == a.row)
+                set_color(ui->renderer,
+                          PLAYER_COL[ui->history[ui->history_len - 1].to_move]);
+            else
+                set_color(ui->renderer, COL_WALL);
             rect = wall_rect(ui, a, o);
             SDL_RenderFillRect(ui->renderer, &rect);
         }
@@ -334,7 +411,16 @@ static void draw_player_info(ui_state *ui, int p, int y)
     board_px = board_size_px(ui);
     cy = y + ui->info_h / 2;
 
-    set_color(ui->renderer, active ? COL_TEXT : COL_TEXT_DIM);
+    /* The seat label is a toggle; it lights up like a button when hovered. */
+    if (ui->hover_seat == p) {
+        set_color(ui->renderer, COL_FRAME);
+        SDL_RenderFillRect(ui->renderer, &ui->seat_rect[p]);
+        set_color(ui->renderer, COL_GRID);
+        SDL_RenderDrawRect(ui->renderer, &ui->seat_rect[p]);
+        set_color(ui->renderer, COL_RING);
+    } else {
+        set_color(ui->renderer, active ? COL_TEXT : COL_TEXT_DIM);
+    }
     font_draw(ui->renderer, ui->board_x, cy - line_h / 2, ui->text_scale,
               ui->player_is_ai[p] ? "AI" : "HUMAN");
 
@@ -362,19 +448,29 @@ static void draw_status(ui_state *ui)
 {
     const qr_game *g = &ui->game;
     char buf[96], mv[4];
-    int cx;
+    int cx, vs_ai;
     SDL_Color c;
 
     cx = ui->board_x + board_size_px(ui) / 2;
+    /* One human against the AI: address the human directly. */
+    vs_ai = ui->player_is_ai[0] != ui->player_is_ai[1];
 
     if (g->winner >= 0) {
-        sprintf(buf, "%s WINS!", PLAYER_NAME[g->winner]);
+        if (vs_ai)
+            strcpy(buf, ui->player_is_ai[g->winner] ? "AI WINS!" : "YOU WIN!");
+        else
+            sprintf(buf, "%s WINS!", PLAYER_NAME[g->winner]);
         c = PLAYER_COL[g->winner];
     } else if (ui->last_error != QR_OK) {
         sprintf(buf, "%s", qr_status_str(ui->last_error));
         c = COL_ERROR;
     } else {
-        sprintf(buf, "%s TO MOVE", PLAYER_NAME[g->to_move]);
+        if (ai_to_move(ui))
+            sprintf(buf, "%s THINKING...", vs_ai ? "AI" : PLAYER_NAME[g->to_move]);
+        else if (vs_ai)
+            strcpy(buf, "YOUR TURN");
+        else
+            sprintf(buf, "%s TO MOVE", PLAYER_NAME[g->to_move]);
         if (ui->history_len > 0 &&
             qr_move_to_str(&ui->history_move[ui->history_len - 1], mv) == 0) {
             strcat(buf, "   LAST: ");
@@ -383,20 +479,30 @@ static void draw_status(ui_state *ui)
         c = COL_TEXT;
     }
     draw_text_centered(ui, cx, ui->status_y, buf, c);
-    draw_text_centered(ui, cx, ui->help_y, "U: UNDO   N: NEW GAME   ESC: QUIT",
-                       COL_TEXT_DIM);
+    draw_text_centered(ui, cx, ui->help_y,
+                       "1/2: TOGGLE AI  U: UNDO  N: NEW  ESC: QUIT", COL_TEXT_DIM);
 }
 
 /* ---- game actions ------------------------------------------------------ */
 
 static void update_hover(ui_state *ui)
 {
+    SDL_Cursor *cursor;
+
     ui->hover_kind = UI_HOVER_NONE;
-    if (!ui->mouse_inside || ui->game.winner >= 0)
-        return;
-    ui->hover_kind = ui_pick(ui, ui->mouse_x, ui->mouse_y, &ui->hover_move);
-    if (ui->hover_kind != UI_HOVER_NONE)
-        ui->hover_status = qr_check_move(&ui->game, &ui->hover_move);
+    ui->hover_seat = -1;
+    if (ui->mouse_inside) {
+        ui->hover_seat = seat_at(ui, ui->mouse_x, ui->mouse_y);
+        if (ui->hover_seat < 0 && ui->game.winner < 0 && !ai_to_move(ui)) {
+            ui->hover_kind = ui_pick(ui, ui->mouse_x, ui->mouse_y, &ui->hover_move);
+            if (ui->hover_kind != UI_HOVER_NONE)
+                ui->hover_status = qr_check_move(&ui->game, &ui->hover_move);
+        }
+    }
+
+    cursor = ui->hover_seat >= 0 ? ui->cursor_hand : ui->cursor_arrow;
+    if (cursor)
+        SDL_SetCursor(cursor);
 }
 
 static void push_history(ui_state *ui, const qr_game *before, const qr_move *m)
@@ -413,31 +519,127 @@ static void push_history(ui_state *ui, const qr_game *before, const qr_move *m)
     ui->history_len++;
 }
 
+/* Runs on the worker thread. */
+static int ai_worker(void *data)
+{
+    ui_state *ui = data;
+    SDL_Event e;
+
+    ui->ai_result = qr_ai_choose_move(&ui->ai, &ui->ai_game, &ui->ai_move);
+
+    memset(&e, 0, sizeof e);
+    e.type = ui->ai_event;
+    e.user.code = ui->ai_serial;
+    SDL_PushEvent(&e);
+    return 0;
+}
+
+/* Starts a search if it is an AI seat's turn and none is running. */
+static void ai_start(ui_state *ui)
+{
+    if (ui->ai_thread || !ai_to_move(ui))
+        return;
+
+    ui->ai_game = ui->game;
+    qr_ai_clear_stop(&ui->ai);
+    ui->ai_serial++;
+    ui->ai_thread = SDL_CreateThread(ai_worker, "quoridor-ai", ui);
+    if (!ui->ai_thread) {
+        fprintf(stderr, "SDL_CreateThread: %s\n", SDL_GetError());
+        ui->player_is_ai[ui->game.to_move] = 0;   /* let a human take over */
+    }
+}
+
+/* Stops the running search, if any, and discards its result. Its completion
+ * event may already be queued; the next ai_start makes its serial stale. */
+static void ai_cancel(ui_state *ui)
+{
+    if (!ui->ai_thread)
+        return;
+    qr_ai_stop(&ui->ai);
+    SDL_WaitThread(ui->ai_thread, NULL);
+    ui->ai_thread = NULL;
+}
+
+/* Plays m for the player to move; if that hands the turn to an AI seat,
+ * its search starts. */
+static qr_status play_move(ui_state *ui, const qr_move *m)
+{
+    qr_game before;
+    qr_status st;
+
+    before = ui->game;
+    st = qr_apply_move(&ui->game, m);
+    if (st == QR_OK) {
+        push_history(ui, &before, m);
+        ai_start(ui);
+    }
+    update_hover(ui);
+    return st;
+}
+
+/* The worker has posted its completion event: collect and play its move. */
+static void ai_finish(ui_state *ui)
+{
+    SDL_WaitThread(ui->ai_thread, NULL);
+    ui->ai_thread = NULL;
+    if (ui->ai_result == 0)
+        play_move(ui, &ui->ai_move);
+}
+
+/* Rewinds to the latest position in which a human was to move, so that
+ * undoing against the AI also takes back its reply. Does nothing if there
+ * is no such position (in particular when both seats are AI). */
 static void undo(ui_state *ui)
 {
-    if (ui->history_len == 0)
+    int n = ui->history_len - 1;
+
+    while (n >= 0 && ui->player_is_ai[ui->history[n].to_move])
+        n--;
+    if (n < 0)
         return;
-    ui->history_len--;
-    ui->game = ui->history[ui->history_len];
+
+    ai_cancel(ui);
+    ui->history_len = n;
+    ui->game = ui->history[n];
     ui->last_error = QR_OK;
     update_hover(ui);
 }
 
 static void new_game(ui_state *ui)
 {
+    ai_cancel(ui);
     qr_game_init(&ui->game);
     ui->history_len = 0;
     ui->last_error = QR_OK;
+    ai_start(ui);
+    update_hover(ui);
+}
+
+static void toggle_seat(ui_state *ui, int p)
+{
+    /* A running search belongs to the seat to move. */
+    if (ui->game.to_move == p)
+        ai_cancel(ui);
+    ui->player_is_ai[p] = !ui->player_is_ai[p];
+    ui->last_error = QR_OK;
+    ai_start(ui);
     update_hover(ui);
 }
 
 static void click(ui_state *ui, int x, int y)
 {
-    qr_game before;
     qr_move m;
     ui_hover_kind kind;
+    int seat;
 
-    if (ui->game.winner >= 0)
+    seat = seat_at(ui, x, y);
+    if (seat >= 0) {
+        toggle_seat(ui, seat);
+        return;
+    }
+
+    if (ui->game.winner >= 0 || ai_to_move(ui))
         return;
     kind = ui_pick(ui, x, y, &m);
     if (kind == UI_HOVER_NONE)
@@ -447,11 +649,7 @@ static void click(ui_state *ui, int x, int y)
         m.pos.row == ui->game.pawn[ui->game.to_move].row)
         return;   /* clicking your own pawn does nothing */
 
-    before = ui->game;
-    ui->last_error = qr_apply_move(&ui->game, &m);
-    if (ui->last_error == QR_OK)
-        push_history(ui, &before, &m);
-    update_hover(ui);
+    ui->last_error = play_move(ui, &m);
 }
 
 /* Window coordinates -> renderer output pixels (differ on high-DPI). */
@@ -495,18 +693,38 @@ int ui_init(ui_state *ui, int width, int height)
     SDL_SetRenderDrawBlendMode(ui->renderer, SDL_BLENDMODE_BLEND);
     SDL_SetWindowMinimumSize(ui->window, 360, 460);
 
+    ui->ai_event = SDL_RegisterEvents(1);
+    if (ui->ai_event == (Uint32)-1) {
+        fprintf(stderr, "SDL_RegisterEvents: out of user events\n");
+        ui_shutdown(ui);
+        return -1;
+    }
+    ui->cursor_arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+    ui->cursor_hand = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
+
     qr_game_init(&ui->game);
+    qr_ai_init(&ui->ai, (unsigned long)time(NULL));
+    ui->player_is_ai[1] = 1;   /* human (purple, moves first) vs AI */
     ui->running = 1;
     ui->hover_kind = UI_HOVER_NONE;
+    ui->hover_seat = -1;
     ui->hover_status = QR_OK;
     ui->last_orient = QR_WALL_H;
     ui->last_error = QR_OK;
     ui_layout(ui);
+    ai_start(ui);
     return 0;
 }
 
 void ui_shutdown(ui_state *ui)
 {
+    ai_cancel(ui);
+    if (ui->cursor_arrow)
+        SDL_FreeCursor(ui->cursor_arrow);
+    if (ui->cursor_hand)
+        SDL_FreeCursor(ui->cursor_hand);
+    ui->cursor_arrow = NULL;
+    ui->cursor_hand = NULL;
     if (ui->renderer)
         SDL_DestroyRenderer(ui->renderer);
     if (ui->window)
@@ -566,12 +784,22 @@ void ui_handle_event(ui_state *ui, const SDL_Event *e)
         case SDLK_n:
             new_game(ui);
             break;
+        case SDLK_1:
+            toggle_seat(ui, 0);
+            break;
+        case SDLK_2:
+            toggle_seat(ui, 1);
+            break;
         default:
             break;
         }
         break;
 
     default:
+        /* the worker finished; ignore events from searches since cancelled */
+        if (e->type == ui->ai_event && ui->ai_thread &&
+            e->user.code == ui->ai_serial)
+            ai_finish(ui);
         break;
     }
 }

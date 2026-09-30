@@ -81,6 +81,42 @@
     "output": "build/quoridor.o"
   },
   {
+    "file": "src/ai.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-c",
+      "src/ai.c",
+      "-o",
+      "build/ai.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/ai.o"
+  },
+  {
+    "file": "src/atomics.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-c",
+      "src/atomics.c",
+      "-o",
+      "build/atomics.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/atomics.o"
+  },
+  {
     "file": "tests/test_quoridor.c",
     "arguments": [
       "/usr/bin/gcc",
@@ -98,5 +134,24 @@
     ],
     "directory": "/home/sc/devel/quoridor",
     "output": "build/test_quoridor.o"
+  },
+  {
+    "file": "tests/test_ai.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-Isrc",
+      "-c",
+      "tests/test_ai.c",
+      "-o",
+      "build/test_ai.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/test_ai.o"
   }
 ]

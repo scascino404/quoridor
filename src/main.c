@@ -1,5 +1,5 @@
 /*
- * main.c - Quoridor, human vs human.
+ * main.c - Quoridor: window and event loop.
  */
 #include <stdio.h>
 
