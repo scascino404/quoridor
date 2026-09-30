@@ -24,6 +24,7 @@ typedef struct {
     qr_game       history[UI_MAX_HISTORY];     /* undo stack of snapshots */
     qr_move       history_move[UI_MAX_HISTORY]; /* move played from each snapshot */
     int           history_len;
+    int           player_is_ai[QR_NUM_PLAYERS]; /* label only for now; all human */
 
     /* layout, recomputed on resize */
     int           cell_px, groove_px, board_x, board_y;

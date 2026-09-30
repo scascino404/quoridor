@@ -327,23 +327,16 @@ static void draw_player_info(ui_state *ui, int p, int y)
     const qr_game *g = &ui->game;
     char buf[8];
     SDL_Rect bar;
-    int active, cy, radius, ring, line_h, x, i, bar_w, bar_gap, board_px;
+    int active, cy, line_h, i, bar_w, bar_gap, board_px;
 
     active = (g->winner < 0 && g->to_move == p) || g->winner == p;
     line_h = FONT_GLYPH_H * ui->text_scale;
     board_px = board_size_px(ui);
     cy = y + ui->info_h / 2;
-    radius = ui->info_h / 3;
-    ring = radius / 6 < 2 ? 2 : radius / 6;
-    x = ui->board_x;
-
-    if (active)
-        fill_circle(ui->renderer, x + radius, cy, radius + ring, COL_RING);
-    fill_circle(ui->renderer, x + radius, cy, radius, PLAYER_COL[p]);
 
     set_color(ui->renderer, active ? COL_TEXT : COL_TEXT_DIM);
-    font_draw(ui->renderer, x + 2 * radius + ui->cell_px / 3, cy - line_h / 2,
-              ui->text_scale, PLAYER_NAME[p]);
+    font_draw(ui->renderer, ui->board_x, cy - line_h / 2, ui->text_scale,
+              ui->player_is_ai[p] ? "AI" : "HUMAN");
 
     /* Wall stock, right-aligned with the board: remaining walls bright. */
     bar_w = ui->groove_px * 2 / 3 < 2 ? 2 : ui->groove_px * 2 / 3;
