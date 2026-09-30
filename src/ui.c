@@ -88,7 +88,7 @@ static SDL_Rect wall_rect(const ui_state *ui, qr_pos anchor, qr_orient o)
     return r;
 }
 
-static void ui_layout(ui_state *ui)
+static void update_layout(ui_state *ui)
 {
     int w, h, cell, board_px, label_h, gap, line_h, total, top, p, pad;
 
@@ -153,10 +153,23 @@ static int ai_to_move(const ui_state *ui)
     return ui->game.winner < 0 && ui->player_is_ai[ui->game.to_move];
 }
 
+/* Nonzero while it is a human seat's turn: only then does the board take
+ * the mouse. */
+static int human_to_move(const ui_state *ui)
+{
+    return ui->game.winner < 0 && !ui->player_is_ai[ui->game.to_move];
+}
+
+/* Nonzero for the player to move or, once the game is over, the winner. */
+static int player_is_active(const qr_game *g, int p)
+{
+    return g->winner < 0 ? g->to_move == p : g->winner == p;
+}
+
 /* Map a point (output pixels) to the move it would make: a square means a
  * pawn move, a groove means a wall. The wall's other half extends towards
  * whichever half of the neighbouring square the cursor is in. */
-static ui_hover_kind ui_pick(ui_state *ui, int x, int y, qr_move *out)
+static ui_hover_kind pick_move(ui_state *ui, int x, int y, qr_move *out)
 {
     int pitch = ui->cell_px + ui->groove_px;
     int board_px = board_size_px(ui);
@@ -261,7 +274,7 @@ static void draw_board(ui_state *ui)
     const qr_game *prev;
     const qr_move *last;
     qr_pos dest[QR_MAX_PAWN_MOVES];
-    int n = 0, i, p, c, r, board_px, half, thick;
+    int n = 0, i, p, board_px, half, thick;
     SDL_Rect rect, frame;
     qr_pos pos;
 
@@ -274,20 +287,18 @@ static void draw_board(ui_state *ui)
     set_color(ui->renderer, COL_FRAME);
     SDL_RenderDrawRect(ui->renderer, &frame);
 
-    for (c = 0; c < QR_BOARD_SIZE; c++) {
-        for (r = 0; r < QR_BOARD_SIZE; r++) {
-            pos.col = c;
-            pos.row = r;
+    for (pos.col = 0; pos.col < QR_BOARD_SIZE; pos.col++) {
+        for (pos.row = 0; pos.row < QR_BOARD_SIZE; pos.row++) {
             rect = square_rect(ui, pos);
             set_color(ui->renderer, COL_SQUARE);
             for (p = 0; p < QR_NUM_PLAYERS; p++)
-                if (r == qr_goal_row(p))
+                if (pos.row == qr_goal_row(p))
                     set_color(ui->renderer, PLAYER_GOAL[p]);
             SDL_RenderFillRect(ui->renderer, &rect);
         }
     }
 
-    if (g->winner < 0 && !ai_to_move(ui)) {
+    if (human_to_move(ui)) {
         n = qr_pawn_moves(g, dest);
         if (ui->hover_kind == UI_HOVER_SQUARE && ui->hover_status == QR_OK) {
             rect = square_rect(ui, ui->hover_move.pos);
@@ -297,10 +308,8 @@ static void draw_board(ui_state *ui)
     }
 
     set_color(ui->renderer, COL_GRID);
-    for (c = 0; c < QR_BOARD_SIZE; c++) {
-        for (r = 0; r < QR_BOARD_SIZE; r++) {
-            pos.col = c;
-            pos.row = r;
+    for (pos.col = 0; pos.col < QR_BOARD_SIZE; pos.col++) {
+        for (pos.row = 0; pos.row < QR_BOARD_SIZE; pos.row++) {
             rect = square_rect(ui, pos);
             SDL_RenderDrawRect(ui->renderer, &rect);
         }
@@ -392,7 +401,7 @@ static void draw_pawns(ui_state *ui)
         rect = square_rect(ui, g->pawn[p]);
         cx = rect.x + rect.w / 2;
         cy = rect.y + rect.h / 2;
-        if ((g->winner < 0 && g->to_move == p) || g->winner == p)
+        if (player_is_active(g, p))
             fill_circle(ui->renderer, cx, cy, radius + ring, COL_RING);
         fill_circle(ui->renderer, cx, cy, radius, PLAYER_COL[p]);
     }
@@ -405,7 +414,7 @@ static void draw_player_info(ui_state *ui, int p, int y)
     SDL_Rect bar;
     int active, cy, line_h, i, bar_w, bar_gap, board_px;
 
-    active = (g->winner < 0 && g->to_move == p) || g->winner == p;
+    active = player_is_active(g, p);
     line_h = FONT_GLYPH_H * ui->text_scale;
     board_px = board_size_px(ui);
     cy = y + ui->info_h / 2;
@@ -461,7 +470,7 @@ static void draw_status(ui_state *ui)
             sprintf(buf, "%s WINS!", PLAYER_NAME[g->winner]);
         c = PLAYER_COL[g->winner];
     } else if (ui->last_error != QR_OK) {
-        sprintf(buf, "%s", qr_status_str(ui->last_error));
+        strcpy(buf, qr_status_str(ui->last_error));
         c = COL_ERROR;
     } else {
         if (ai_to_move(ui))
@@ -492,8 +501,8 @@ static void update_hover(ui_state *ui)
     ui->hover_seat = -1;
     if (ui->mouse_inside) {
         ui->hover_seat = seat_at(ui, ui->mouse_x, ui->mouse_y);
-        if (ui->hover_seat < 0 && ui->game.winner < 0 && !ai_to_move(ui)) {
-            ui->hover_kind = ui_pick(ui, ui->mouse_x, ui->mouse_y, &ui->hover_move);
+        if (ui->hover_seat < 0 && human_to_move(ui)) {
+            ui->hover_kind = pick_move(ui, ui->mouse_x, ui->mouse_y, &ui->hover_move);
             if (ui->hover_kind != UI_HOVER_NONE)
                 ui->hover_status = qr_check_move(&ui->game, &ui->hover_move);
         }
@@ -638,9 +647,9 @@ static void click(ui_state *ui, int x, int y)
         return;
     }
 
-    if (ui->game.winner >= 0 || ai_to_move(ui))
+    if (!human_to_move(ui))
         return;
-    kind = ui_pick(ui, x, y, &m);
+    kind = pick_move(ui, x, y, &m);
     if (kind == UI_HOVER_NONE)
         return;
     if (kind == UI_HOVER_SQUARE &&
@@ -710,7 +719,7 @@ int ui_init(ui_state *ui, int width, int height)
     ui->hover_status = QR_OK;
     ui->last_orient = QR_WALL_H;
     ui->last_error = QR_OK;
-    ui_layout(ui);
+    update_layout(ui);
     ai_start(ui);
     return 0;
 }
@@ -743,7 +752,7 @@ void ui_handle_event(ui_state *ui, const SDL_Event *e)
 
     case SDL_WINDOWEVENT:
         if (e->window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-            ui_layout(ui);
+            update_layout(ui);
             update_hover(ui);
         } else if (e->window.event == SDL_WINDOWEVENT_LEAVE) {
             ui->mouse_inside = 0;
