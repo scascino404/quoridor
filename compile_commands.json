@@ -1,0 +1,102 @@
+[
+  {
+    "file": "src/main.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-isystem",
+      "/usr/include/SDL2",
+      "-D_REENTRANT",
+      "-c",
+      "src/main.c",
+      "-o",
+      "build/main.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/main.o"
+  },
+  {
+    "file": "src/ui.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-isystem",
+      "/usr/include/SDL2",
+      "-D_REENTRANT",
+      "-c",
+      "src/ui.c",
+      "-o",
+      "build/ui.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/ui.o"
+  },
+  {
+    "file": "src/font.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-isystem",
+      "/usr/include/SDL2",
+      "-D_REENTRANT",
+      "-c",
+      "src/font.c",
+      "-o",
+      "build/font.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/font.o"
+  },
+  {
+    "file": "src/quoridor.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-c",
+      "src/quoridor.c",
+      "-o",
+      "build/quoridor.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/quoridor.o"
+  },
+  {
+    "file": "tests/test_quoridor.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-Isrc",
+      "-c",
+      "tests/test_quoridor.c",
+      "-o",
+      "build/test_quoridor.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/test_quoridor.o"
+  }
+]
