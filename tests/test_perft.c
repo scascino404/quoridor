@@ -64,6 +64,8 @@ static void test_start_position(void)
      * except after d8h, e8h, d8v and e8v, which each close one side of
      * e9: 128 * 3 - 4 = 380. */
     CHECK(perft(&g, 2) == 393UL + 15904UL + 380UL);
+    /* Recorded from the library as of the first perft version. */
+    CHECK(perft(&g, 3) == 2062264UL);
 }
 
 static void test_jump_position(void)
@@ -94,6 +96,36 @@ static void test_walled_position(void)
     CHECK(perft(&g, 1) == 4UL + 124UL);
     /* Recorded from the library as of the first perft version. */
     CHECK(perft(&g, 2) == 15918UL);
+}
+
+static void test_crowded_positions(void)
+{
+    /* 13 walls, both players with several left: most wall slots touch
+     * other walls, and a few would shut a pawn in. */
+    static const char *const open_moves[] = {
+        "e3v", "e8", "a7h", "d2v", "f2h", "h8v", "e2", "a3h", "a6v", "d6h",
+        "e1", "f8", "f1", "g8", "f2", "b4v", "f1", "d4v", "f2", "b8v", "g3v",
+        "f5h", NULL
+    };
+    /* 15 walls that leave corridors, so many slots would block a path;
+     * the first player has one wall left and soon only moves the pawn. */
+    static const char *const tight_moves[] = {
+        "f2h", "e8", "b5h", "d8", "a3v", "h4h", "g3v", "d7", "h6h", "d8",
+        "f1", "b6v", "d5h", "g5v", "d6h", "f5h", "g1", "c7v", "a5v", "d7",
+        "b2h", "b4h", NULL
+    };
+    qr_game g;
+
+    /* All totals recorded from the library as of the first perft version. */
+    setup(&g, open_moves);
+    CHECK(perft(&g, 1) == 85UL);
+    CHECK(perft(&g, 2) == 7036UL);
+    CHECK(perft(&g, 3) == 553793UL);
+
+    setup(&g, tight_moves);
+    CHECK(perft(&g, 1) == 72UL);
+    CHECK(perft(&g, 2) == 4881UL);
+    CHECK(perft(&g, 3) == 28244UL);
 }
 
 static void test_won_lines_end_early(void)
@@ -144,6 +176,7 @@ int main(void)
     test_start_position();
     test_jump_position();
     test_walled_position();
+    test_crowded_positions();
     test_won_lines_end_early();
     test_leaves_game_unchanged();
 

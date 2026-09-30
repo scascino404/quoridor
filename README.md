@@ -80,6 +80,7 @@ From the starting position:
 | 1 | 131 |
 | 2 | 16677 |
 | 3 | 2062264 |
+| 4 | 247569030 |
 
 ## Rules implemented
 
