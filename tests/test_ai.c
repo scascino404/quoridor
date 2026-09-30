@@ -1,34 +1,12 @@
 /*
- * test_ai.c - tests for the Quoridor AI. Same conventions as
- * test_quoridor.c: no framework, failures are printed and the process exits
- * nonzero.
+ * test_ai.c - tests for the Quoridor AI.
  */
-#include <stdio.h>
 #include <string.h>
 
 #include "ai.h"
-
-static int checks = 0;
-static int failures = 0;
-
-#define CHECK(cond) \
-    do { \
-        checks++; \
-        if (!(cond)) { \
-            failures++; \
-            fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #cond); \
-        } \
-    } while (0)
+#include "check.h"
 
 #define MAX_PLIES 400
-
-static qr_pos sq(const char *s)
-{
-    qr_pos p;
-    p.col = s[0] - 'a';
-    p.row = s[1] - '1';
-    return p;
-}
 
 static int same_move(const qr_move *a, const qr_move *b)
 {
@@ -36,21 +14,22 @@ static int same_move(const qr_move *a, const qr_move *b)
            a->pos.col == b->pos.col && a->pos.row == b->pos.row;
 }
 
-/* Lets the AI play both sides from g for at most max_plies, recording the
- * moves. Returns the number of plies played, or -1 if the AI failed to
- * produce a legal move while the game was still in progress. */
-static int self_play(qr_ai *ai, qr_game *g, int max_plies, qr_move *record)
+/* Lets the AI play both sides from g for at most MAX_PLIES, recording the
+ * moves in `record` unless it is NULL. Returns the number of plies played,
+ * or -1 if the AI failed to produce a legal move while the game was still
+ * in progress. */
+static int self_play(qr_ai *ai, qr_game *g, qr_move record[MAX_PLIES])
 {
     qr_move m;
     int ply = 0;
 
-    while (g->winner < 0 && ply < max_plies) {
-        if (qr_ai_choose_move(ai, g, &m) != 0)
+    while (g->winner < 0 && ply < MAX_PLIES) {
+        if (qr_ai_choose_move(ai, g, &m) != 0 ||
+            qr_apply_move(g, &m) != QR_OK)
             return -1;
-        if (qr_check_move(g, &m) != QR_OK)
-            return -1;
-        qr_apply_move(g, &m);
-        record[ply++] = m;
+        if (record != NULL)
+            record[ply] = m;
+        ply++;
     }
     return ply;
 }
@@ -182,7 +161,6 @@ static void test_stop(void)
 /* Whole games at depth 1 (fast): every move legal, and the game ends. */
 static void test_self_play_finishes(void)
 {
-    static qr_move record[MAX_PLIES];
     qr_game g;
     qr_ai ai;
     unsigned long seed;
@@ -192,7 +170,7 @@ static void test_self_play_finishes(void)
         qr_game_init(&g);
         qr_ai_init(&ai, seed);
         ai.depth = 1;
-        plies = self_play(&ai, &g, MAX_PLIES, record);
+        plies = self_play(&ai, &g, NULL);
         CHECK(plies > 0);
         CHECK(g.winner >= 0);
     }
@@ -201,13 +179,12 @@ static void test_self_play_finishes(void)
 /* One whole game at the default depth, which also gets walls placed. */
 static void test_default_depth_game(void)
 {
-    static qr_move record[MAX_PLIES];
     qr_game g;
     qr_ai ai;
 
     qr_game_init(&g);
     qr_ai_init(&ai, 3UL);
-    CHECK(self_play(&ai, &g, MAX_PLIES, record) > 0);
+    CHECK(self_play(&ai, &g, NULL) > 0);
     CHECK(g.winner >= 0);
     CHECK(g.walls_left[0] < QR_WALLS_PER_PLAYER ||
           g.walls_left[1] < QR_WALLS_PER_PLAYER);
@@ -223,12 +200,12 @@ static void test_same_seed_same_game(void)
     qr_game_init(&g);
     qr_ai_init(&ai, 1234UL);
     ai.depth = 1;
-    na = self_play(&ai, &g, MAX_PLIES, a);
+    na = self_play(&ai, &g, a);
 
     qr_game_init(&g);
     qr_ai_init(&ai, 1234UL);
     ai.depth = 1;
-    nb = self_play(&ai, &g, MAX_PLIES, b);
+    nb = self_play(&ai, &g, b);
 
     CHECK(na > 0 && na == nb);
     for (i = 0; i < na && i < nb; i++)
@@ -247,10 +224,5 @@ int main(void)
     test_default_depth_game();
     test_same_seed_same_game();
 
-    if (failures) {
-        fprintf(stderr, "%d of %d checks FAILED\n", failures, checks);
-        return 1;
-    }
-    printf("all %d checks passed\n", checks);
-    return 0;
+    return check_report();
 }

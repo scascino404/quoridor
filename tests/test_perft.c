@@ -1,35 +1,27 @@
 /*
- * test_perft.c - perft regression tests. Same conventions as
- * test_quoridor.c: no framework, failures are printed and the process exits
- * nonzero.
+ * test_perft.c - perft regression tests.
  *
  * The totals pin down move generation as a whole, so that changes to the
  * library's internals cannot alter it unnoticed.
  */
-#include <stdio.h>
 #include <string.h>
 
+#include "check.h"
 #include "perft.h"
 
-static int checks = 0;
-static int failures = 0;
+/* Pawns face to face on e5/e6 with a wall behind e6 and one left of e5, so
+ * both straight and diagonal jumps occur in the tree. */
+static const char *const JUMP_MOVES[] = {
+    "e2", "e8", "e3", "e7", "e4", "e6", "e6h", "d4v", "e5", NULL
+};
 
-#define CHECK(cond) \
-    do { \
-        checks++; \
-        if (!(cond)) { \
-            failures++; \
-            fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #cond); \
-        } \
-    } while (0)
-
-static qr_pos sq(const char *s)
-{
-    qr_pos p;
-    p.col = s[0] - 'a';
-    p.row = s[1] - '1';
-    return p;
-}
+/* 15 walls that leave corridors, so many slots would block a path; the
+ * first player has one wall left and soon only moves the pawn. */
+static const char *const TIGHT_MOVES[] = {
+    "f2h", "e8", "b5h", "d8", "a3v", "h4h", "g3v", "d7", "h6h", "d8",
+    "f1", "b6v", "d5h", "g5v", "d6h", "f5h", "g1", "c7v", "a5v", "d7",
+    "b2h", "b4h", NULL
+};
 
 /* Plays a NULL-terminated list of moves from the starting position. */
 static void setup(qr_game *g, const char *const *moves)
@@ -70,14 +62,9 @@ static void test_start_position(void)
 
 static void test_jump_position(void)
 {
-    static const char *const moves[] = {
-        "e2", "e8", "e3", "e7", "e4", "e6", "e6h", "d4v", "e5", NULL
-    };
     qr_game g;
 
-    /* Pawns face to face on e5/e6 with a wall behind e6 and one left of e5,
-     * so both straight and diagonal jumps occur in the tree. */
-    setup(&g, moves);
+    setup(&g, JUMP_MOVES);
     /* e4 (jump), d6, f6 + 128 slots minus 2 occupied, 2 crossing and
      * 4 overlapping */
     CHECK(perft(&g, 1) == 3UL + 120UL);
@@ -107,13 +94,6 @@ static void test_crowded_positions(void)
         "e1", "f8", "f1", "g8", "f2", "b4v", "f1", "d4v", "f2", "b8v", "g3v",
         "f5h", NULL
     };
-    /* 15 walls that leave corridors, so many slots would block a path;
-     * the first player has one wall left and soon only moves the pawn. */
-    static const char *const tight_moves[] = {
-        "f2h", "e8", "b5h", "d8", "a3v", "h4h", "g3v", "d7", "h6h", "d8",
-        "f1", "b6v", "d5h", "g5v", "d6h", "f5h", "g1", "c7v", "a5v", "d7",
-        "b2h", "b4h", NULL
-    };
     qr_game g;
 
     /* All totals recorded from the library as of the first perft version. */
@@ -122,7 +102,7 @@ static void test_crowded_positions(void)
     CHECK(perft(&g, 2) == 7036UL);
     CHECK(perft(&g, 3) == 553793UL);
 
-    setup(&g, tight_moves);
+    setup(&g, TIGHT_MOVES);
     CHECK(perft(&g, 1) == 72UL);
     CHECK(perft(&g, 2) == 4881UL);
     CHECK(perft(&g, 3) == 28244UL);
@@ -151,12 +131,9 @@ static void test_won_lines_end_early(void)
 
 static void test_leaves_game_unchanged(void)
 {
-    static const char *const moves[] = {
-        "e2", "e8", "e3", "e7", "e4", "e6", "e6h", "d4v", "e5", NULL
-    };
     qr_game g, before;
 
-    setup(&g, moves);
+    setup(&g, JUMP_MOVES);
     before = g;
     perft(&g, 2);
     CHECK(memcmp(&g, &before, sizeof before) == 0);
@@ -173,11 +150,6 @@ static void test_leaves_game_unchanged(void)
 /* Applying the generated moves unchecked gives the same totals. */
 static void test_unchecked(void)
 {
-    static const char *const moves[] = {
-        "f2h", "e8", "b5h", "d8", "a3v", "h4h", "g3v", "d7", "h6h", "d8",
-        "f1", "b6v", "d5h", "g5v", "d6h", "f5h", "g1", "c7v", "a5v", "d7",
-        "b2h", "b4h", NULL
-    };
     qr_game g, before;
 
     qr_game_init(&g);
@@ -187,7 +159,7 @@ static void test_unchecked(void)
     CHECK(perft_unchecked(&g, 3) == 2062264UL);
     CHECK(memcmp(&g, &before, sizeof before) == 0);
 
-    setup(&g, moves);
+    setup(&g, TIGHT_MOVES);
     before = g;
     CHECK(perft_unchecked(&g, 4) == perft(&g, 4));
     CHECK(memcmp(&g, &before, sizeof before) == 0);
@@ -212,10 +184,5 @@ int main(void)
     test_leaves_game_unchanged();
     test_unchecked();
 
-    if (failures) {
-        fprintf(stderr, "%d of %d checks FAILED\n", failures, checks);
-        return 1;
-    }
-    printf("all %d checks passed\n", checks);
-    return 0;
+    return check_report();
 }

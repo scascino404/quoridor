@@ -1,23 +1,11 @@
 /*
- * test_quoridor.c - rule tests for the Quoridor library. No framework:
- * each CHECK failure is printed and the process exits nonzero.
+ * test_quoridor.c - rule tests for the Quoridor library.
  */
 #include <stdio.h>
 #include <string.h>
 
+#include "check.h"
 #include "quoridor.h"
-
-static int checks = 0;
-static int failures = 0;
-
-#define CHECK(cond) \
-    do { \
-        checks++; \
-        if (!(cond)) { \
-            failures++; \
-            fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #cond); \
-        } \
-    } while (0)
 
 static qr_move mv(const char *s)
 {
@@ -45,18 +33,10 @@ static qr_status check(const qr_game *g, const char *s)
     return qr_check_move(g, &m);
 }
 
-static qr_pos sq(const char *s)
-{
-    qr_pos p;
-    p.col = s[0] - 'a';
-    p.row = s[1] - '1';
-    return p;
-}
-
 static int count_pawn_moves(const qr_game *g)
 {
-    qr_pos out[QR_MAX_PAWN_MOVES];
-    return qr_pawn_moves(g, out);
+    qr_pos dest[QR_MAX_PAWN_MOVES];
+    return qr_pawn_moves(g, dest);
 }
 
 static void test_init(void)
@@ -530,10 +510,5 @@ int main(void)
     test_legal_moves_agree_with_check();
     test_notation();
 
-    if (failures) {
-        fprintf(stderr, "%d of %d checks FAILED\n", failures, checks);
-        return 1;
-    }
-    printf("all %d checks passed\n", checks);
-    return 0;
+    return check_report();
 }

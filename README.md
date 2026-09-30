@@ -26,7 +26,8 @@ make clean
 | `src/ui.[ch]` | SDL2 rendering and input; runs the AI on a worker thread. |
 | `src/font.[ch]` | Embedded 5x7 bitmap font. |
 | `src/main.c` | Window and event loop. |
-| `tests/test_quoridor.c` | Rule tests (no framework). |
+| `tests/check.h` | What the tests share: the `CHECK` macro and its report. No framework. |
+| `tests/test_quoridor.c` | Rule tests. |
 | `tests/test_ai.c` | AI tests. |
 | `tests/test_perft.c` | Perft totals for a few positions, as a regression test for move generation. |
 

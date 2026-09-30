@@ -57,13 +57,13 @@ $(GAME): $(UI_OBJS) $(AI_OBJS) $(LIB_OBJS)
 	$(CC) $(UI_OBJS) $(AI_OBJS) $(LIB_OBJS) $(SDL_LIBS) -lm -o $@
 
 # Tests: no SDL.
-$(BUILD)/test_quoridor.o: tests/test_quoridor.c src/quoridor.h | $(BUILD)
+$(BUILD)/test_quoridor.o: tests/test_quoridor.c tests/check.h src/quoridor.h | $(BUILD)
 	$(CC) $(CFLAGS) -Isrc -c $< -o $@
 
-$(BUILD)/test_ai.o: tests/test_ai.c src/ai.h src/atomics.h src/quoridor.h | $(BUILD)
+$(BUILD)/test_ai.o: tests/test_ai.c tests/check.h src/ai.h src/atomics.h src/quoridor.h | $(BUILD)
 	$(CC) $(CFLAGS) -Isrc -c $< -o $@
 
-$(BUILD)/test_perft.o: tests/test_perft.c tools/perft.h src/quoridor.h | $(BUILD)
+$(BUILD)/test_perft.o: tests/test_perft.c tests/check.h tools/perft.h src/quoridor.h | $(BUILD)
 	$(CC) $(CFLAGS) -Isrc -Itools -c $< -o $@
 
 $(BUILD)/test_quoridor: $(BUILD)/test_quoridor.o $(LIB_OBJS)
