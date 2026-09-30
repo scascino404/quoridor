@@ -63,24 +63,6 @@
     "output": "build/font.o"
   },
   {
-    "file": "src/quoridor.c",
-    "arguments": [
-      "/usr/bin/gcc",
-      "-std=c89",
-      "-pedantic",
-      "-Wall",
-      "-Wextra",
-      "-O2",
-      "-g",
-      "-c",
-      "src/quoridor.c",
-      "-o",
-      "build/quoridor.o"
-    ],
-    "directory": "/home/sc/devel/quoridor",
-    "output": "build/quoridor.o"
-  },
-  {
     "file": "src/ai.c",
     "arguments": [
       "/usr/bin/gcc",
@@ -115,6 +97,62 @@
     ],
     "directory": "/home/sc/devel/quoridor",
     "output": "build/atomics.o"
+  },
+  {
+    "file": "src/quoridor.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-c",
+      "src/quoridor.c",
+      "-o",
+      "build/quoridor.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/quoridor.o"
+  },
+  {
+    "file": "tools/perft_cli.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-Isrc",
+      "-c",
+      "tools/perft_cli.c",
+      "-o",
+      "build/perft_cli.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/perft_cli.o"
+  },
+  {
+    "file": "tools/perft.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-Isrc",
+      "-c",
+      "tools/perft.c",
+      "-o",
+      "build/perft.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/perft.o"
   },
   {
     "file": "tests/test_quoridor.c",
@@ -153,5 +191,25 @@
     ],
     "directory": "/home/sc/devel/quoridor",
     "output": "build/test_ai.o"
+  },
+  {
+    "file": "tests/test_perft.c",
+    "arguments": [
+      "/usr/bin/gcc",
+      "-std=c89",
+      "-pedantic",
+      "-Wall",
+      "-Wextra",
+      "-O2",
+      "-g",
+      "-Isrc",
+      "-Itools",
+      "-c",
+      "tests/test_perft.c",
+      "-o",
+      "build/test_perft.o"
+    ],
+    "directory": "/home/sc/devel/quoridor",
+    "output": "build/test_perft.o"
   }
 ]
