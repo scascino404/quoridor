@@ -306,18 +306,17 @@ static void draw_board(ui_state *ui)
         }
     }
 
-    /* Last move, if it was a pawn move: outline the square it left (dim)
-     * and the one it reached, in the mover's colour. */
-    if (ui->history_len > 0) {
-        last = &ui->history_move[ui->history_len - 1];
-        prev = &ui->history[ui->history_len - 1];
-        if (last->type == QR_MOVE_PAWN) {
-            thick = ui->cell_px / 16 < 2 ? 2 : ui->cell_px / 16;
+    /* Each player's latest move, if it was a pawn move: outline the square
+     * it left, in the mover's colour. The pawn itself marks the square it
+     * reached. */
+    thick = ui->cell_px / 16 < 2 ? 2 : ui->cell_px / 16;
+    for (i = ui->history_len - 1;
+         i >= 0 && i >= ui->history_len - QR_NUM_PLAYERS; i--) {
+        last = &ui->history_move[i];
+        prev = &ui->history[i];
+        if (last->type == QR_MOVE_PAWN)
             draw_outline(ui->renderer, square_rect(ui, prev->pawn[prev->to_move]),
                          thick, PLAYER_HOVER[prev->to_move]);
-            draw_outline(ui->renderer, square_rect(ui, last->pos),
-                         thick, PLAYER_COL[prev->to_move]);
-        }
     }
 
     for (i = 0; i < n; i++) {
