@@ -109,7 +109,7 @@ static void update_layout(ui_state *ui)
     label_h = cell / 2;
     gap = cell / 3;
 
-    total = ui->info_h + gap + board_px + label_h + ui->info_h + gap + 3 * line_h;
+    total = ui->info_h + gap + board_px + label_h + ui->info_h + gap + 7 * line_h / 2;
     top = (h - total) / 2;
     if (top < 0)
         top = 0;
@@ -119,7 +119,7 @@ static void update_layout(ui_state *ui)
     ui->board_x = (w - board_px) / 2;
     ui->bottom_info_y = ui->board_y + board_px + label_h;
     ui->status_y = ui->bottom_info_y + ui->info_h + gap;
-    ui->help_y = ui->status_y + 2 * line_h;
+    ui->help_y = ui->status_y + 5 * line_h / 2;
 
     /* Seat labels sit at the left of each info row; the clickable area is
      * sized for the longer label so it does not move when toggled. */
@@ -234,14 +234,39 @@ static void set_color(SDL_Renderer *r, SDL_Color c)
     SDL_SetRenderDrawColor(r, c.r, c.g, c.b, c.a);
 }
 
-static void fill_circle(SDL_Renderer *r, int cx, int cy, int radius, SDL_Color c)
+/* Fills a circle centred on (cx, cy), where pixel (x, y) spans [x, x+1) by
+ * [y, y+1). Pixels on the edge are blended in proportion to how much of
+ * them the circle covers (estimated from the distance of their centre), so
+ * the outline is anti-aliased; runs of fully covered pixels are drawn as
+ * lines. */
+static void fill_circle(SDL_Renderer *r, double cx, double cy, double radius,
+                        SDL_Color c)
 {
-    int dy, dx;
+    int x, y, x0, x1, y0, y1, run;
+    double dx, dy, cover;
 
-    set_color(r, c);
-    for (dy = -radius; dy <= radius; dy++) {
-        dx = (int)(sqrt((double)(radius * radius - dy * dy)) + 0.5);
-        SDL_RenderDrawLine(r, cx - dx, cy + dy, cx + dx, cy + dy);
+    x0 = (int)floor(cx - radius - 0.5);
+    x1 = (int)ceil(cx + radius + 0.5);
+    y0 = (int)floor(cy - radius - 0.5);
+    y1 = (int)ceil(cy + radius + 0.5);
+    for (y = y0; y < y1; y++) {
+        dy = y + 0.5 - cy;
+        run = x0;
+        for (x = x0; x <= x1; x++) {
+            dx = x + 0.5 - cx;
+            cover = x < x1 ? radius + 0.5 - sqrt(dx * dx + dy * dy) : 0.0;
+            if (cover >= 1.0)
+                continue;
+            if (run < x) {
+                set_color(r, c);
+                SDL_RenderDrawLine(r, run, y, x - 1, y);
+            }
+            run = x + 1;
+            if (cover > 0.0) {
+                SDL_SetRenderDrawColor(r, c.r, c.g, c.b, (Uint8)(c.a * cover + 0.5));
+                SDL_RenderDrawPoint(r, x, y);
+            }
+        }
     }
 }
 
@@ -330,8 +355,8 @@ static void draw_board(ui_state *ui)
 
     for (i = 0; i < n; i++) {
         rect = square_rect(ui, dest[i]);
-        fill_circle(ui->renderer, rect.x + rect.w / 2, rect.y + rect.h / 2,
-                    ui->cell_px / 9, PLAYER_COL[g->to_move]);
+        fill_circle(ui->renderer, rect.x + rect.w / 2.0, rect.y + rect.h / 2.0,
+                    ui->cell_px / 9.0, PLAYER_COL[g->to_move]);
     }
 }
 
@@ -393,14 +418,15 @@ static void draw_pawns(ui_state *ui)
 {
     const qr_game *g = &ui->game;
     SDL_Rect rect;
-    int p, cx, cy, radius, ring;
+    double cx, cy;
+    int p, radius, ring;
 
     radius = ui->cell_px * 9 / 25;
     ring = ui->cell_px / 20 < 2 ? 2 : ui->cell_px / 20;
     for (p = 0; p < QR_NUM_PLAYERS; p++) {
         rect = square_rect(ui, g->pawn[p]);
-        cx = rect.x + rect.w / 2;
-        cy = rect.y + rect.h / 2;
+        cx = rect.x + rect.w / 2.0;
+        cy = rect.y + rect.h / 2.0;
         if (player_is_active(g, p))
             fill_circle(ui->renderer, cx, cy, radius + ring, COL_RING);
         fill_circle(ui->renderer, cx, cy, radius, PLAYER_COL[p]);
