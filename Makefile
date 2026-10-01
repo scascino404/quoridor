@@ -26,9 +26,9 @@ $(BUILD):
 $(BUILD)/quoridor.o: src/quoridor.c src/quoridor.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# AI: uses the library but is not part of it. No SDL.
+# AI: uses the library but is not part of it. No SDL; POSIX threads.
 $(BUILD)/ai.o: src/ai.c src/ai.h src/atomics.h src/quoridor.h | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -pthread -c $< -o $@
 
 $(BUILD)/atomics.o: src/atomics.c src/atomics.h | $(BUILD)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -54,7 +54,7 @@ $(BUILD)/font.o: src/font.c src/font.h | $(BUILD)
 	$(CC) $(CFLAGS) $(SDL_CFLAGS) -c $< -o $@
 
 $(GAME): $(UI_OBJS) $(AI_OBJS) $(LIB_OBJS)
-	$(CC) $^ $(SDL_LIBS) -lm -o $@
+	$(CC) $^ $(SDL_LIBS) -pthread -lm -o $@
 
 # Tests: no SDL.
 $(BUILD)/test_quoridor.o: tests/test_quoridor.c tests/check.h src/quoridor.h | $(BUILD)
@@ -70,7 +70,7 @@ $(BUILD)/test_quoridor: $(BUILD)/test_quoridor.o $(LIB_OBJS)
 	$(CC) $^ -o $@
 
 $(BUILD)/test_ai: $(BUILD)/test_ai.o $(AI_OBJS) $(LIB_OBJS)
-	$(CC) $^ -o $@
+	$(CC) $^ -pthread -o $@
 
 $(BUILD)/test_perft: $(BUILD)/test_perft.o $(BUILD)/perft.o $(LIB_OBJS)
 	$(CC) $^ -o $@

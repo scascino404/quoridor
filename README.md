@@ -1,11 +1,11 @@
 # Quoridor
 
 Two-player Quoridor in C89 with an SDL2 frontend, playable against another
-human or against a simple AI.
+human or against the computer.
 
 ## Build
 
-Requires gcc, make and SDL2 (`sdl2-config` on the PATH).
+Requires gcc, make, SDL2 (`sdl2-config` on the PATH) and POSIX threads.
 
 ```
 make          # build/quoridor, build/perft and the tests
@@ -19,8 +19,8 @@ make clean
 | File | Purpose |
 | --- | --- |
 | `src/quoridor.[ch]` | Game library: rules, legality, path check, notation. No SDL. |
-| `src/ai.[ch]` | AI: depth-limited minimax over the library's public API. No SDL, no threads of its own. Not part of the library. |
-| `src/atomics.[ch]` | Atomic int, used to stop an AI search from another thread. The only code that relies on compiler extensions (GCC/Clang `__atomic` builtins). Not part of the library. |
+| `src/ai.[ch]` | AI: multi-threaded alpha-beta search over the library's public API. No SDL; POSIX threads. Not part of the library. |
+| `src/atomics.[ch]` | Atomic values, used to stop an AI search from another thread and to share the AI's transposition table between its threads. The only code that relies on compiler extensions (GCC/Clang `__atomic` builtins). Not part of the library. |
 | `tools/perft.[ch]` | Perft: counts the move tree to a given depth over the library's public API. Not part of the library. |
 | `tools/perft_cli.c` | Command-line perft, built as `build/perft`. No SDL. |
 | `src/ui.[ch]` | SDL2 rendering and input; runs the AI on a worker thread. |
@@ -54,10 +54,23 @@ reply as well. With no human seated, undo does nothing.
 
 ## AI
 
-Two-ply minimax with alpha-beta pruning: the AI picks the move whose worst
-outcome, after the opponent's best reply, leaves it furthest ahead, measured
-as the opponent's shortest path minus its own. Equal moves are decided in
-favour of pawn moves, then at random.
+The AI searches for about two seconds per move on four threads:
+
+- Iterative-deepening alpha-beta (principal variation search) with a
+  transposition table shared by the threads, killer and history move
+  ordering, and null-move pruning. The threads search the same tree at
+  slightly different depths (Lazy SMP).
+- At the root every legal move is considered; deeper in the tree only the
+  walls that cut one of the opponent's shortest paths, the only walls that
+  can lengthen it.
+- The evaluation is the difference between the two players' shortest paths,
+  plus the walls each has left and a bonus for the player to move. A player
+  who moves first and can no longer be walled in wins the race if its path
+  is no longer than the opponent's.
+
+With the default two seconds it typically completes 16 to 20 plies. The
+time budget, depth limit and thread count are fields of `qr_ai` (see
+`src/ai.h`).
 
 ## Perft
 

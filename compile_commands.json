@@ -72,6 +72,7 @@
       "-Wextra",
       "-O2",
       "-g",
+      "-pthread",
       "-c",
       "src/ai.c",
       "-o",
