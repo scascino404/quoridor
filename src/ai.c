@@ -9,7 +9,8 @@
  *
  * Evaluation. Mostly the difference of the two shortest paths (pawns are
  * ignored), weighing more as the paths get short, plus the walls each side
- * has left (the first ones worth most) and a bonus for the side to move.
+ * has left (the first ones worth most, and all of them more while the
+ * paths are long) and a bonus for the side to move.
  * Each side's threat counts too: the most one wall can add to the other's
  * path, if that side has a wall left. A side that moves first and can no
  * longer be walled in wins the race if its path is no longer than the
@@ -57,12 +58,16 @@
  * regression of game results on 335k positions of 6,000 self-play games,
  * scaled so that one step of path difference is worth 100, and were then
  * checked in timed matches against the previous evaluation (branch
- * better-eval, reports/better-eval.md). */
+ * better-eval, reports/better-eval.md). The wall weights (EVAL_CURVE,
+ * EVAL_WALLFAR) were then raised in timed matches against that version,
+ * which spent its walls too early (branch walls-traps). */
 #define EVAL_STEP    100    /* one step of shortest-path difference */
 #define EVAL_REL     50     /* ten times the path difference over the
                              * total path length */
 #define EVAL_WALL    180    /* a wall in hand */
-#define EVAL_CURVE   40     /* tenths: less for each further wall in hand */
+#define EVAL_CURVE   20     /* tenths: less for each further wall in hand */
+#define EVAL_WALLFAR 60     /* a wall in hand, more per step of the two
+                             * paths' total length over 16 */
 #define EVAL_TEMPO   10     /* being the side to move */
 #define EVAL_RACE    5000   /* a race that can no longer be lost */
 #define EVAL_THREAT  65     /* per step one wall of mine can add to the
@@ -633,7 +638,8 @@ static int eval_terms(int dm, int dop, int wm, int wo)
     if (wm == 0 && dop < dm)
         return -EVAL_RACE + EVAL_STEP * dop - 10 * dm;
     return EVAL_STEP * (dop - dm) + EVAL_REL * 10 * (dop - dm) / (dop + dm + 1) +
-           wall_value(wm) - wall_value(wo) + EVAL_TEMPO;
+           wall_value(wm) - wall_value(wo) +
+           EVAL_WALLFAR * (wm - wo) * (dm + dop) / 16 + EVAL_TEMPO;
 }
 
 /* Threat terms for the side to move: tm is what one wall of mine can add
