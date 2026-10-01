@@ -116,8 +116,10 @@ static void update_layout(ui_state *ui)
     ui->info_h = cell * 3 / 4;
     board_px = board_size_px(ui);
     line_h = FONT_GLYPH_H * ui->text_scale;
-    label_h = label_gap_px(ui) + line_h;
     gap = cell / 3;
+    /* The file labels, then the same gap that separates the top info row
+     * from the board. */
+    label_h = label_gap_px(ui) + line_h + gap;
 
     total = ui->info_h + gap + board_px + label_h + ui->info_h + gap + 7 * line_h / 2;
     top = (h - total) / 2;
