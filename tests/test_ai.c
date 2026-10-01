@@ -110,22 +110,24 @@ static void test_takes_winning_move(void)
 {
     qr_game g;
     qr_ai ai;
-    qr_move m;
+    qr_move m, c9, g1;
     int depth;
 
+    CHECK(qr_move_from_str("c9", &c9) == 0);
+    CHECK(qr_move_from_str("g1", &g1) == 0);
     for (depth = 1; depth <= 3; depth++) {
         init_fixed(&ai, 1UL, depth);
 
         qr_game_init(&g);
         g.pawn[0] = sq("c8");
         CHECK(qr_ai_choose_move(&ai, &g, &m) == 0);
-        CHECK(m.type == QR_MOVE_PAWN && m.pos.col == 2 && m.pos.row == 8);
+        CHECK(same_move(&m, &c9));
 
         qr_game_init(&g);
         g.pawn[1] = sq("g2");
         g.to_move = 1;
         CHECK(qr_ai_choose_move(&ai, &g, &m) == 0);
-        CHECK(m.type == QR_MOVE_PAWN && m.pos.col == 6 && m.pos.row == 0);
+        CHECK(same_move(&m, &g1));
     }
 }
 

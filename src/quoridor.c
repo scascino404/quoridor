@@ -729,26 +729,23 @@ void qr_undo_move(qr_game *g, const qr_move *m, qr_pos from)
 
 int qr_move_to_str(const qr_move *m, char buf[4])
 {
-    if (m->type == QR_MOVE_PAWN) {
-        if (!on_board(m->pos))
-            return -1;
-        buf[0] = (char)('a' + m->pos.col);
-        buf[1] = (char)('1' + m->pos.row);
-        buf[2] = '\0';
-        return 0;
-    }
-    if (m->type == QR_MOVE_WALL) {
-        if (m->pos.col < 0 || m->pos.col >= QR_WALL_GRID ||
-            m->pos.row < 0 || m->pos.row >= QR_WALL_GRID ||
-            (m->orient != QR_WALL_H && m->orient != QR_WALL_V))
-            return -1;
-        buf[0] = (char)('a' + m->pos.col);
-        buf[1] = (char)('1' + m->pos.row);
-        buf[2] = m->orient == QR_WALL_H ? 'h' : 'v';
-        buf[3] = '\0';
-        return 0;
-    }
-    return -1;
+    int col = m->pos.col, row = m->pos.row, limit;
+
+    if (m->type == QR_MOVE_PAWN)
+        limit = QR_BOARD_SIZE;
+    else if (m->type == QR_MOVE_WALL &&
+             (m->orient == QR_WALL_H || m->orient == QR_WALL_V))
+        limit = QR_WALL_GRID;
+    else
+        return -1;
+    if (col < 0 || col >= limit || row < 0 || row >= limit)
+        return -1;
+
+    buf[0] = (char)('a' + col);
+    buf[1] = (char)('1' + row);
+    buf[2] = m->type == QR_MOVE_PAWN ? '\0' : m->orient == QR_WALL_H ? 'h' : 'v';
+    buf[3] = '\0';
+    return 0;
 }
 
 int qr_move_from_str(const char *s, qr_move *m)

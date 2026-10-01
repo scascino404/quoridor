@@ -51,16 +51,15 @@
 
 #define WIN       10000     /* a won game; less the plies needed to win it */
 #define INF       30000
-#define MATE_BAND 9000      /* scores beyond this are wins or losses */
+#define WIN_BAND  9000      /* scores beyond this are wins or losses */
 #define MAX_PLY   64
 
 /* Evaluation weights, in hundredths of a step. They come from a logistic
  * regression of game results on 335k positions of 6,000 self-play games,
- * scaled so that one step of path difference is worth 100, and were then
- * checked in timed matches against the previous evaluation (branch
- * better-eval, reports/better-eval.md). The wall weights (EVAL_CURVE,
- * EVAL_WALLFAR) were then raised in timed matches against that version,
- * which spent its walls too early (branch walls-traps). */
+ * scaled so that one step of path difference is worth 100, and were checked
+ * in timed matches against the previous evaluation. The wall weights
+ * (EVAL_CURVE, EVAL_WALLFAR) were later raised in timed matches against
+ * that version, which spent its walls too early. */
 #define EVAL_STEP    100    /* one step of shortest-path difference */
 #define EVAL_REL     50     /* ten times the path difference over the
                              * total path length */
@@ -89,7 +88,7 @@
 #define TT_EXACT 1
 #define TT_LOWER 2
 #define TT_UPPER 3
-#define NO_MOVE  0xFF
+#define NO_MOVE  0xFF       /* stored in the table for "no best move" */
 
 /* --- Paths --- */
 
@@ -162,16 +161,55 @@ static int layer_dist(const layers *L, int c, int r)
     return -1;
 }
 
+/* One layer of a walk along the player's shortest paths from its pawn: s
+ * holds the squares reached so far at some distance, next the squares one
+ * step nearer the goal row (a layer from goal_layers). Sets t to the squares
+ * of next that s steps onto, and records the steps: bit r of vs[c] is a
+ * step between rows r and r + 1 in column c, bit r of hs[c] one between
+ * columns c and c + 1 in row r. Returns nonzero if there was any step. */
+static int path_steps(const qr_masks *m, const unsigned s[QR_BOARD_SIZE],
+                      const unsigned next[QR_BOARD_SIZE], unsigned t[QR_BOARD_SIZE],
+                      unsigned vs[QR_BOARD_SIZE], unsigned hs[QR_WALL_GRID])
+{
+    unsigned e, any = 0;
+    int c;
+
+    for (c = 0; c < QR_BOARD_SIZE; c++)
+        t[c] = vs[c] = 0;
+    for (c = 0; c < QR_WALL_GRID; c++)
+        hs[c] = 0;
+    for (c = 0; c < QR_BOARD_SIZE; c++) {
+        if (!s[c])
+            continue;
+        e = s[c] & m->up[c] & next[c] >> 1;         /* up from row r */
+        t[c] |= e << 1;
+        vs[c] |= e;
+        e = s[c] >> 1 & m->up[c] & next[c];         /* down onto row r */
+        t[c] |= e;
+        vs[c] |= e;
+        if (c < QR_BOARD_SIZE - 1) {                /* right */
+            e = s[c] & m->side[c + 1] & next[c + 1];
+            t[c + 1] |= e;
+            hs[c] |= e;
+        }
+        if (c > 0) {                                /* left */
+            e = s[c] & m->side[c] & next[c - 1];
+            t[c - 1] |= e;
+            hs[c - 1] |= e;
+        }
+    }
+    for (c = 0; c < QR_BOARD_SIZE; c++)
+        any |= t[c];
+    return any != 0;
+}
+
 /* Sets `out` to the walls that block a step of some shortest path of the
  * player from its pawn (L from goal_layers for that player). Walls outside
- * this set cannot make the player's path longer. Walks the paths back from
- * the pawn a layer at a time. */
+ * this set cannot make the player's path longer. */
 static void path_walls(const qr_game *g, int player, const layers *L,
                        wall_set *out)
 {
-    const qr_masks *m = &g->masks;
-    unsigned s[QR_BOARD_SIZE], t[QR_BOARD_SIZE], up, down, e, any;
-    const unsigned *next;
+    unsigned s[QR_BOARD_SIZE], t[QR_BOARD_SIZE], vs[QR_BOARD_SIZE], hs[QR_WALL_GRID];
     qr_pos p = g->pawn[player];
     int c, d;
 
@@ -182,42 +220,14 @@ static void path_walls(const qr_game *g, int player, const layers *L,
     for (c = 0; c < QR_BOARD_SIZE; c++)
         s[c] = 0;
     s[p.col] = 1u << p.row;
-    for (d = L->pawn; d > 0; d--) {
-        next = L->sq[d - 1];
-        for (c = 0; c < QR_BOARD_SIZE; c++)
-            t[c] = 0;
-        for (c = 0; c < QR_BOARD_SIZE; c++) {
-            if (!s[c])
-                continue;
-            /* Up from row r, or down onto row r: either way blocked by
-             * H at (c, r) and (c - 1, r). */
-            up = s[c] & m->up[c] & next[c] >> 1;
-            down = s[c] >> 1 & m->up[c] & next[c];
-            t[c] |= up << 1 | down;
-            if (c < QR_WALL_GRID)
-                out->h[c] |= up | down;
-            if (c > 0)
-                out->h[c - 1] |= up | down;
-            /* Right from row r: blocked by V at (c, r) and (c, r - 1). */
-            if (c < QR_BOARD_SIZE - 1) {
-                e = s[c] & m->side[c + 1] & next[c + 1];
-                t[c + 1] |= e;
-                out->v[c] |= (e | e >> 1) & SLOT_BITS;
-            }
-            /* Left from row r: blocked by V at (c - 1, r) and (c - 1, r - 1). */
-            if (c > 0) {
-                e = s[c] & m->side[c] & next[c - 1];
-                t[c - 1] |= e;
-                out->v[c - 1] |= (e | e >> 1) & SLOT_BITS;
-            }
+    for (d = L->pawn; d > 0 && path_steps(&g->masks, s, L->sq[d - 1], t, vs, hs); d--) {
+        /* A step in column c is blocked by H at (c - 1, r) and (c, r); one
+         * from column c to c + 1 by V at (c, r - 1) and (c, r). */
+        for (c = 0; c < QR_WALL_GRID; c++) {
+            out->h[c] |= vs[c] | vs[c + 1];
+            out->v[c] |= (hs[c] | hs[c] >> 1) & SLOT_BITS;
         }
-        any = 0;
-        for (c = 0; c < QR_BOARD_SIZE; c++) {
-            s[c] = t[c];
-            any |= t[c];
-        }
-        if (!any)
-            break;
+        memcpy(s, t, sizeof s);
     }
 }
 
@@ -229,7 +239,7 @@ static int in_wall_set(const wall_set *s, const qr_move *m)
 /* Nonzero if a wall fits at (c, r): its slot is free and it neither
  * crosses nor overlaps another wall. Whether it closes a path is not
  * checked. */
-static int wall_fits(const qr_game *g, qr_orient o, int c, int r)
+static int wall_fits(const qr_game *g, int c, int r, qr_orient o)
 {
     const qr_masks *m = &g->masks;
 
@@ -259,10 +269,8 @@ static int bits3(unsigned x)
 static void choke_walls(const qr_game *g, int player, const layers *L,
                         wall_set *out)
 {
-    const qr_masks *m = &g->masks;
     unsigned s[QR_BOARD_SIZE], t[QR_BOARD_SIZE], vs[QR_BOARD_SIZE], hs[QR_WALL_GRID];
-    unsigned e, any;
-    const unsigned *next;
+    unsigned e;
     qr_pos p = g->pawn[player];
     int c, d, n, vc, hc, r;
 
@@ -273,45 +281,21 @@ static void choke_walls(const qr_game *g, int player, const layers *L,
     for (c = 0; c < QR_BOARD_SIZE; c++)
         s[c] = 0;
     s[p.col] = 1u << p.row;
-    for (d = L->pawn; d > 0; d--) {
-        next = L->sq[d - 1];
-        /* vs[c] bit r: a step between rows r and r + 1 in column c;
-         * hs[c] bit r: a step between columns c and c + 1 in row r. */
-        for (c = 0; c < QR_BOARD_SIZE; c++)
-            t[c] = vs[c] = 0;
-        for (c = 0; c < QR_WALL_GRID; c++)
-            hs[c] = 0;
-        for (c = 0; c < QR_BOARD_SIZE; c++) {
-            if (!s[c])
-                continue;
-            e = s[c] & m->up[c] & next[c] >> 1;
-            t[c] |= e << 1;
-            vs[c] |= e;
-            e = s[c] >> 1 & m->up[c] & next[c];
-            t[c] |= e;
-            vs[c] |= e;
-            if (c < QR_BOARD_SIZE - 1) {
-                e = s[c] & m->side[c + 1] & next[c + 1];
-                t[c + 1] |= e;
-                hs[c] |= e;
-            }
-            if (c > 0) {
-                e = s[c] & m->side[c] & next[c - 1];
-                t[c - 1] |= e;
-                hs[c - 1] |= e;
-            }
-        }
+    for (d = L->pawn; d > 0 && path_steps(&g->masks, s, L->sq[d - 1], t, vs, hs); d--) {
+        /* Count the steps up to 3; vc and hc are the first columns with
+         * steps of each kind. */
         n = 0;
         vc = hc = -1;
-        any = 0;
         for (c = 0; c < QR_BOARD_SIZE && n < 3; c++) {
             if (vs[c]) {
                 n += bits3(vs[c]);
-                vc = vc < 0 ? c : vc;
+                if (vc < 0)
+                    vc = c;
             }
             if (c < QR_WALL_GRID && hs[c]) {
                 n += bits3(hs[c]);
-                hc = hc < 0 ? c : hc;
+                if (hc < 0)
+                    hc = c;
             }
         }
         if (n == 1 && vc >= 0) {
@@ -330,15 +314,9 @@ static void choke_walls(const qr_game *g, int player, const layers *L,
         } else if (n == 2 && hc >= 0 && vc < 0) {
             /* Two steps across: one wall if one above the other. */
             e = hs[hc];
-            if ((e & (e >> 1)) != 0)
-                out->v[hc] |= e & e >> 1;
+            out->v[hc] |= e & e >> 1;
         }
-        for (c = 0; c < QR_BOARD_SIZE; c++) {
-            s[c] = t[c];
-            any |= t[c];
-        }
-        if (!any)
-            break;
+        memcpy(s, t, sizeof s);
     }
 }
 
@@ -360,7 +338,7 @@ static int threat(qr_game *g, int player, const layers *L)
         for (r = 0; r < QR_WALL_GRID; r++) {
             for (m.orient = QR_WALL_H; m.orient <= QR_WALL_V; m.orient++) {
                 bits = m.orient == QR_WALL_H ? cut.h[c] : cut.v[c];
-                if (!(bits >> r & 1) || !wall_fits(g, m.orient, c, r))
+                if (!(bits >> r & 1) || !wall_fits(g, c, r, m.orient))
                     continue;
                 m.pos.col = c;
                 m.pos.row = r;
@@ -377,11 +355,16 @@ static int threat(qr_game *g, int player, const layers *L)
 
 /* --- Moves and keys --- */
 
+static int square_code(qr_pos p)
+{
+    return p.col * QR_BOARD_SIZE + p.row;
+}
+
 /* Pawn moves are numbered by destination square, walls after them. */
 static int move_code(const qr_move *m)
 {
     if (m->type == QR_MOVE_PAWN)
-        return m->pos.col * QR_BOARD_SIZE + m->pos.row;
+        return square_code(m->pos);
     return NSQ + ((m->pos.col * QR_WALL_GRID + m->pos.row) << 1) +
            (m->orient == QR_WALL_V);
 }
@@ -411,7 +394,7 @@ typedef struct {
 } hkey;
 
 #define KEY_PAWN(p, sq)  ((p) * NSQ + (sq))
-#define KEY_WALL(code)   (2 * NSQ + (code) - NSQ)
+#define KEY_WALL(code)   (NSQ + (code))    /* wall codes start at NSQ */
 #define KEY_WALLS_LEFT(p, n) \
     (2 * NSQ + 2 * NSLOT + (p) * (QR_WALLS_PER_PLAYER + 1) + (n))
 #define KEY_SIDE         (2 * NSQ + 2 * NSLOT + 2 * (QR_WALLS_PER_PLAYER + 1))
@@ -460,7 +443,7 @@ static hkey key_of(const qr_game *g)
     int p;
 
     for (p = 0; p < QR_NUM_PLAYERS; p++) {
-        key_toggle(&k, KEY_PAWN(p, g->pawn[p].col * QR_BOARD_SIZE + g->pawn[p].row));
+        key_toggle(&k, KEY_PAWN(p, square_code(g->pawn[p])));
         key_toggle(&k, KEY_WALLS_LEFT(p, g->walls_left[p]));
     }
     if (g->to_move)
@@ -474,7 +457,7 @@ static void key_move(hkey *k, const qr_game *g, const qr_move *m)
     int p = g->to_move;
 
     if (m->type == QR_MOVE_PAWN) {
-        key_toggle(k, KEY_PAWN(p, g->pawn[p].col * QR_BOARD_SIZE + g->pawn[p].row));
+        key_toggle(k, KEY_PAWN(p, square_code(g->pawn[p])));
         key_toggle(k, KEY_PAWN(p, move_code(m)));
     } else {
         key_toggle(k, KEY_WALL(move_code(m)));
@@ -494,24 +477,23 @@ typedef struct {
 } tt_entry;
 
 #define TT_SIZE (1UL << TT_BITS)
-
 #define TC_SIZE (1UL << TC_BITS)
 
-/* The threat cache: a player's threat depends only on the walls and that
- * player's pawn, so entries never go stale and the cache is never cleared.
- * An entry holds the threat + 1 as data, checked like the table's. */
-static tt_entry      *table, *threats;
-static pthread_once_t table_once = PTHREAD_ONCE_INIT;
+/* tt is the transposition table. tc is the threat cache: a player's threat
+ * depends only on the walls and that player's pawn, so entries never go
+ * stale and the cache is never cleared. A tc entry holds the threat + 1 as
+ * data, checked like a tt entry. Either is NULL if it could not be
+ * allocated. */
+static tt_entry      *tt, *tc;
+static pthread_once_t tables_once = PTHREAD_ONCE_INIT;
 
-static void table_alloc(void)
+static void tables_alloc(void)
 {
-    table = calloc(TT_SIZE, sizeof *table);
-    threats = calloc(TC_SIZE, sizeof *threats);
+    tt = calloc(TT_SIZE, sizeof *tt);
+    tc = calloc(TC_SIZE, sizeof *tc);
 }
 
 typedef struct {
-    tt_entry     *tt;
-    unsigned long tt_mask;
     qr_atomic_int halt;      /* set once the search must end */
     qr_ai        *ai;        /* for its stop flag */
     double        deadline;  /* monotonic ms; 0 = none */
@@ -574,20 +556,21 @@ static int count_node(worker *w)
 /* Win scores are stored relative to the node, not the root. */
 static int score_to_tt(int s, int ply)
 {
-    return s > MATE_BAND ? s + ply : s < -MATE_BAND ? s - ply : s;
+    return s > WIN_BAND ? s + ply : s < -WIN_BAND ? s - ply : s;
 }
 
 static int score_from_tt(int s, int ply)
 {
-    return s > MATE_BAND ? s - ply : s < -MATE_BAND ? s + ply : s;
+    return s > WIN_BAND ? s - ply : s < -WIN_BAND ? s + ply : s;
 }
 
 static tt_entry *tt_slot(const worker *w)
 {
-    return &w->sh->tt[w->key.a & w->sh->tt_mask];
+    return &tt[w->key.a & (TT_SIZE - 1)];
 }
 
-/* Returns nonzero and fills the fields if the position is in the table. */
+/* Returns nonzero and fills the fields if the position is in the table;
+ * *code is -1 if the entry has no best move. */
 static int tt_probe(const worker *w, int *code, int *depth, int *bound,
                     int *score)
 {
@@ -596,7 +579,7 @@ static int tt_probe(const worker *w, int *code, int *depth, int *bound,
 
     if ((qr_atomic_load_ulong(&t->check) ^ data) != w->key.b)
         return 0;
-    *code = (int)(data & 0xFF);
+    *code = (data & 0xFF) == NO_MOVE ? -1 : (int)(data & 0xFF);
     *depth = (int)(data >> 8 & 0x3F);
     *bound = (int)(data >> 14 & 3);
     *score = (int)(data >> 16 & 0xFFFF) - 32768;
@@ -660,11 +643,10 @@ static int threat_of(qr_game *g, worker *w, int player)
     unsigned long data;
     int v;
 
-    if (w && threats) {
+    if (w && tc) {
         k = w->wkey;
-        key_toggle(&k, KEY_PAWN(player, g->pawn[player].col * QR_BOARD_SIZE +
-                                        g->pawn[player].row));
-        e = &threats[k.a & (TC_SIZE - 1)];
+        key_toggle(&k, KEY_PAWN(player, square_code(g->pawn[player])));
+        e = &tc[k.a & (TC_SIZE - 1)];
         data = qr_atomic_load_ulong(&e->data);
         if (data && (qr_atomic_load_ulong(&e->check) ^ data) == k.b)
             return (int)data - 1;
@@ -801,7 +783,8 @@ static int frontier(worker *w, int alpha, int beta, int ply)
     const qr_move *m;
     int me = g->to_move, op = 1 - me;
     int wm = g->walls_left[me], wo = g->walls_left[op];
-    int dm, dop, n, i, j, k, v, d1, d2, bound, t_me, t_op, pv[QR_MAX_PAWN_MOVES];
+    int dm, dop, n, i, j, k, v, d1, d2, bound, t_me, t_op;
+    int pawn_v[QR_MAX_PAWN_MOVES];
     int best = -INF, best_code = -1, alpha0 = alpha;
     qr_pos from = g->pawn[me];
 
@@ -815,16 +798,16 @@ static int frontier(worker *w, int alpha, int beta, int ply)
      * moves are taken best first without it, and the threat is measured
      * only while a move can still beat the best. */
     for (i = 0; i < n; i++)
-        pv[i] = -eval_terms(dop, layer_dist(&lm, dest[i].col, dest[i].row), wo, wm) -
-                threat_terms(0, t_op);
+        pawn_v[i] = -eval_terms(dop, layer_dist(&lm, dest[i].col, dest[i].row),
+                                wo, wm) - threat_terms(0, t_op);
     for (k = 0; k < n; k++) {
         for (j = -1, i = 0; i < n; i++)
-            if (pv[i] > -INF && (j < 0 || pv[i] > pv[j]))
+            if (pawn_v[i] > -INF && (j < 0 || pawn_v[i] > pawn_v[j]))
                 j = i;
-        if (pv[j] <= best)
+        if (pawn_v[j] <= best)
             break;
-        v = pv[j];
-        pv[j] = -INF;
+        v = pawn_v[j];
+        pawn_v[j] = -INF;
         if (wo > 0) {
             g->pawn[me] = dest[j];
             v -= EVAL_THREAT * threat_of(g, w, me);
@@ -832,7 +815,7 @@ static int frontier(worker *w, int alpha, int beta, int ply)
         }
         if (v > best) {
             best = v;
-            best_code = dest[j].col * QR_BOARD_SIZE + dest[j].row;
+            best_code = square_code(dest[j]);
         }
     }
     w->nodes += n;
@@ -900,16 +883,12 @@ static int search(worker *w, int depth, int alpha, int beta, int ply)
     if (count_node(w))
         return 0;
 
-    if (tt_probe(w, &tcode, &tdepth, &tbound, &tscore)) {
-        if (tcode == NO_MOVE)
-            tcode = -1;
-        if (tdepth >= depth) {
-            tscore = score_from_tt(tscore, ply);
-            if (tbound == TT_EXACT ||
-                (tbound == TT_LOWER && tscore >= beta) ||
-                (tbound == TT_UPPER && tscore <= alpha))
-                return tscore;
-        }
+    if (tt_probe(w, &tcode, &tdepth, &tbound, &tscore) && tdepth >= depth) {
+        tscore = score_from_tt(tscore, ply);
+        if (tbound == TT_EXACT ||
+            (tbound == TT_LOWER && tscore >= beta) ||
+            (tbound == TT_UPPER && tscore <= alpha))
+            return tscore;
     }
     if (depth <= 0 || ply >= MAX_PLY - 1)
         return evaluate(g, w);
@@ -926,7 +905,7 @@ static int search(worker *w, int depth, int alpha, int beta, int ply)
      * real move does too. Never twice in a row or in the principal
      * variation. */
     if (depth >= NULL_MOVE_MIN_DEPTH && beta - alpha == 1 && !w->after_null &&
-        beta < MATE_BAND && evaluate(g, w) >= beta) {
+        beta < WIN_BAND && evaluate(g, w) >= beta) {
         r = depth >= 6 ? 3 : 2;
         g->to_move = 1 - g->to_move;
         key_toggle(&w->key, KEY_SIDE);
@@ -1043,7 +1022,7 @@ static void deepen(worker *w, smove *mv, int n, int first, double start)
         qsort(mv + 1, (size_t)(n - 1), sizeof mv[0], by_score);
         if (w->id > 0)
             continue;
-        if (w->best_score > MATE_BAND || w->best_score < -MATE_BAND)
+        if (w->best_score > WIN_BAND || w->best_score < -WIN_BAND)
             break;
         if (sh->deadline > 0 && now_ms() - start > (sh->deadline - start) / 2)
             break;
@@ -1073,10 +1052,10 @@ void qr_ai_init(qr_ai *ai, unsigned long seed)
 {
     unsigned long i;
 
-    pthread_once(&table_once, table_alloc);
-    for (i = 0; table && i < TT_SIZE; i++) {
-        qr_atomic_store_ulong(&table[i].check, 0);
-        qr_atomic_store_ulong(&table[i].data, 0);
+    pthread_once(&tables_once, tables_alloc);
+    for (i = 0; tt && i < TT_SIZE; i++) {
+        qr_atomic_store_ulong(&tt[i].check, 0);
+        qr_atomic_store_ulong(&tt[i].data, 0);
     }
     ai->rng = seed & 0xFFFFFFFFUL;
     ai->time_ms = QR_AI_DEFAULT_TIME_MS;
@@ -1120,12 +1099,10 @@ int qr_ai_choose_move(qr_ai *ai, const qr_game *g, qr_move *out)
               ai->threads > QR_AI_MAX_THREADS ? QR_AI_MAX_THREADS : ai->threads;
     if (time_ms <= 0 && ai->depth <= 0)
         time_ms = QR_AI_DEFAULT_TIME_MS;
-    pthread_once(&table_once, table_alloc);
-    sh.tt = table;
-    sh.tt_mask = TT_SIZE - 1;
+    pthread_once(&tables_once, tables_alloc);
     ws = malloc(threads * sizeof *ws);
     ha = malloc(threads * sizeof *ha);
-    if (!sh.tt || !ws || !ha) {
+    if (!tt || !ws || !ha) {
         free(ws);
         free(ha);
         return -1;
@@ -1153,9 +1130,8 @@ int qr_ai_choose_move(qr_ai *ai, const qr_game *g, qr_move *out)
         w->id = i;
         for (j = 0; j < MAX_PLY; j++)
             w->killers[j][0] = w->killers[j][1] = -1;
-        if (i == 0)
-            score_moves(w, root, n, -1, 0);
     }
+    score_moves(&ws[0], root, n, -1, 0);
     qsort(root, (size_t)n, sizeof root[0], by_score);
     ws[0].best_code = root[0].code;
     ws[0].best_score = 0;
@@ -1177,7 +1153,5 @@ int qr_ai_choose_move(qr_ai *ai, const qr_game *g, qr_move *out)
     move_decode(ws[0].best_code, out);
     free(ws);
     free(ha);
-    if (qr_atomic_load(&ai->stop))
-        return -1;
-    return 0;
+    return qr_atomic_load(&ai->stop) ? -1 : 0;
 }

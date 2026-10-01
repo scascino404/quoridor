@@ -41,6 +41,11 @@ static const char *PLAYER_NAME[QR_NUM_PLAYERS] = { "PURPLE", "YELLOW" };
 
 /* ---- geometry ---------------------------------------------------------- */
 
+static int at_least(int min, int v)
+{
+    return v < min ? min : v;
+}
+
 static int board_size_px(const ui_state *ui)
 {
     return QR_BOARD_SIZE * ui->cell_px + (QR_BOARD_SIZE - 1) * ui->groove_px;
@@ -97,12 +102,11 @@ static void update_layout(ui_state *ui)
     cell = w * 2 / 25;
     if (h / 16 < cell)
         cell = h / 16;
-    if (cell < 12)
-        cell = 12;
+    cell = at_least(12, cell);
 
     ui->cell_px = cell;
-    ui->groove_px = cell / 4 < 3 ? 3 : cell / 4;
-    ui->text_scale = cell / 22 < 1 ? 1 : cell / 22;
+    ui->groove_px = at_least(3, cell / 4);
+    ui->text_scale = at_least(1, cell / 22);
     ui->info_h = cell * 3 / 4;
     board_px = board_size_px(ui);
     line_h = FONT_GLYPH_H * ui->text_scale;
@@ -343,7 +347,7 @@ static void draw_board(ui_state *ui)
     /* Each player's latest move, if it was a pawn move: outline the square
      * it left, in the mover's colour. The pawn itself marks the square it
      * reached. */
-    thick = ui->cell_px / 16 < 2 ? 2 : ui->cell_px / 16;
+    thick = at_least(2, ui->cell_px / 16);
     for (i = ui->history_len - 1;
          i >= 0 && i >= ui->history_len - QR_NUM_PLAYERS; i--) {
         last = &ui->history_move[i];
@@ -422,7 +426,7 @@ static void draw_pawns(ui_state *ui)
     int p, radius, ring;
 
     radius = ui->cell_px * 9 / 25;
-    ring = ui->cell_px / 20 < 2 ? 2 : ui->cell_px / 20;
+    ring = at_least(2, ui->cell_px / 20);
     for (p = 0; p < QR_NUM_PLAYERS; p++) {
         rect = square_rect(ui, g->pawn[p]);
         cx = rect.x + rect.w / 2.0;
@@ -459,7 +463,7 @@ static void draw_player_info(ui_state *ui, int p, int y)
               ui->player_is_ai[p] ? "AI" : "HUMAN");
 
     /* Wall stock, right-aligned with the board: remaining walls bright. */
-    bar_w = ui->groove_px * 2 / 3 < 2 ? 2 : ui->groove_px * 2 / 3;
+    bar_w = at_least(2, ui->groove_px * 2 / 3);
     bar_gap = bar_w;
     bar.w = bar_w;
     bar.h = ui->info_h * 3 / 4;

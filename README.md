@@ -64,7 +64,8 @@ The AI searches for about two seconds per move on four threads:
   walls that cut one of the opponent's shortest paths, the only walls that
   can lengthen it.
 - The evaluation is the difference between the two players' shortest paths,
-  plus the walls each has left and a bonus for the player to move. A player
+  plus the walls each has left, the most one wall of each player could add
+  to the other's path, and a bonus for the player to move. A player
   who moves first and can no longer be walled in wins the race if its path
   is no longer than the opponent's.
 
