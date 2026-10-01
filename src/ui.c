@@ -51,6 +51,12 @@ static int board_size_px(const ui_state *ui)
     return QR_BOARD_SIZE * ui->cell_px + (QR_BOARD_SIZE - 1) * ui->groove_px;
 }
 
+/* Blank space between the board and its rank and file labels. */
+static int label_gap_px(const ui_state *ui)
+{
+    return ui->cell_px / 4;
+}
+
 static int square_x(const ui_state *ui, int col)
 {
     return ui->board_x + col * (ui->cell_px + ui->groove_px);
@@ -110,7 +116,7 @@ static void update_layout(ui_state *ui)
     ui->info_h = cell * 3 / 4;
     board_px = board_size_px(ui);
     line_h = FONT_GLYPH_H * ui->text_scale;
-    label_h = cell / 2;
+    label_h = label_gap_px(ui) + line_h;
     gap = cell / 3;
 
     total = ui->info_h + gap + board_px + label_h + ui->info_h + gap + 7 * line_h / 2;
@@ -367,20 +373,24 @@ static void draw_board(ui_state *ui)
 static void draw_labels(ui_state *ui)
 {
     char s[2];
-    int i, line_h, board_px;
+    int i, line_h, board_px, gap;
 
     line_h = FONT_GLYPH_H * ui->text_scale;
     board_px = board_size_px(ui);
+    gap = label_gap_px(ui);
     s[1] = '\0';
+    set_color(ui->renderer, COL_TEXT_DIM);
     for (i = 0; i < QR_BOARD_SIZE; i++) {
+        /* Files sit below the board and ranks to its left, each the same
+         * gap away from the board's edge. */
         s[0] = (char)('a' + i);
         draw_text_centered(ui, square_x(ui, i) + ui->cell_px / 2,
-                           ui->board_y + board_px + ui->cell_px / 4 - line_h / 2,
-                           s, COL_TEXT_DIM);
+                           ui->board_y + board_px + gap, s, COL_TEXT_DIM);
         s[0] = (char)('1' + i);
-        draw_text_centered(ui, ui->board_x - ui->cell_px / 3,
-                           square_y(ui, i) + (ui->cell_px - line_h) / 2,
-                           s, COL_TEXT_DIM);
+        font_draw(ui->renderer,
+                  ui->board_x - gap - font_text_width(s, ui->text_scale),
+                  square_y(ui, i) + (ui->cell_px - line_h) / 2,
+                  ui->text_scale, s);
     }
 }
 
