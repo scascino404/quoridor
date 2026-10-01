@@ -27,14 +27,16 @@ typedef struct {
 /* Sets the default time budget and thread count, no depth limit, and
  * clears the stop flag. Also clears what earlier searches learned, which is
  * otherwise kept from move to move in a table shared by all searches in
- * the process (64 MB, allocated on first use). After this, with one thread
+ * the process (64 MB, allocated on first use, plus a 16 MB cache that never
+ * needs clearing). After this, with one thread
  * and no time budget (only a depth limit), the same seed always produces
  * the same moves. */
 void qr_ai_init(qr_ai *ai, unsigned long seed);
 
 /* Static evaluation from `player`'s point of view; higher is better. In
  * hundredths of a step: mostly the difference of the two shortest paths,
- * plus the walls each player has left and a bonus for the player to move.
+ * plus the walls each player has left, the most one wall of each player
+ * could add to the other's path, and a bonus for the player to move.
  * A won game, or a race that can no longer be lost, scores far beyond
  * anything else. */
 int  qr_ai_evaluate(const qr_game *g, int player);

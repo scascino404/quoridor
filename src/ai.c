@@ -8,10 +8,18 @@
  * opponent's shortest paths: no other wall can make that path longer.
  *
  * Evaluation. Mostly the difference of the two shortest paths (pawns are
- * ignored), plus the walls each side has left and a bonus for the side to
- * move. A side that moves first and can no longer be walled in wins the
- * race if its path is no longer than the opponent's; such races score near
- * a win.
+ * ignored), weighing more as the paths get short, plus the walls each side
+ * has left (the first ones worth most) and a bonus for the side to move.
+ * Each side's threat counts too: the most one wall can add to the other's
+ * path, if that side has a wall left. A side that moves first and can no
+ * longer be walled in wins the race if its path is no longer than the
+ * opponent's; such races score near a win.
+ *
+ * Threats. Only walls that block every shortest path at some distance
+ * from the pawn are measured (a wall blocks two steps at most), each with
+ * one breadth-first search. A threat depends only on the walls and the
+ * pawn, so threats are kept in a cache shared by all searches that is
+ * never cleared.
  *
  * Paths. Distances are worked out a whole breadth-first layer at a time on
  * the per-column bit masks of qr_masks (see quoridor.h), which the search
@@ -27,7 +35,8 @@
  * search learns carries over to the next move (worth about 80 Elo). It is
  * allocated on first use and never freed. Since entries are checked against
  * the position and every search evaluates alike, searches running at the
- * same time may share it. qr_ai_init clears it.
+ * same time may share it. qr_ai_init clears it; the threat cache (16 MB)
+ * needs no clearing.
  */
 #define _POSIX_C_SOURCE 200112L
 #include <pthread.h>
@@ -44,15 +53,27 @@
 #define MATE_BAND 9000      /* scores beyond this are wins or losses */
 #define MAX_PLY   64
 
-/* Evaluation weights, in hundredths of a step, tuned in play. */
-#define EVAL_STEP  100      /* one step of shortest-path difference */
-#define EVAL_WALL  150      /* a wall in hand */
-#define EVAL_TEMPO 50       /* being the side to move */
-#define EVAL_RACE  5000     /* a race that can no longer be lost */
+/* Evaluation weights, in hundredths of a step. They come from a logistic
+ * regression of game results on 335k positions of 6,000 self-play games,
+ * scaled so that one step of path difference is worth 100, and were then
+ * checked in timed matches against the previous evaluation (branch
+ * better-eval, reports/better-eval.md). */
+#define EVAL_STEP    100    /* one step of shortest-path difference */
+#define EVAL_REL     50     /* ten times the path difference over the
+                             * total path length */
+#define EVAL_WALL    180    /* a wall in hand */
+#define EVAL_CURVE   40     /* tenths: less for each further wall in hand */
+#define EVAL_TEMPO   10     /* being the side to move */
+#define EVAL_RACE    5000   /* a race that can no longer be lost */
+#define EVAL_THREAT  65     /* per step one wall of mine can add to the
+                             * opponent's path, me to move */
+#define EVAL_THREAT2 46     /* the same, the opponent to move */
 
 #define NULL_MOVE_MIN_DEPTH 3
+#define THREAT_CAP 4        /* threat assumed at most when pruning walls */
 
 #define TT_BITS  22         /* 2^22 entries, 64 MB with 64-bit longs */
+#define TC_BITS  20         /* 2^20 threat cache entries, 16 MB */
 
 #define NSQ       (QR_BOARD_SIZE * QR_BOARD_SIZE)
 #define NSLOT     (QR_WALL_GRID * QR_WALL_GRID)
@@ -200,6 +221,155 @@ static int in_wall_set(const wall_set *s, const qr_move *m)
     return (m->orient == QR_WALL_H ? s->h : s->v)[m->pos.col] >> m->pos.row & 1;
 }
 
+/* Nonzero if a wall fits at (c, r): its slot is free and it neither
+ * crosses nor overlaps another wall. Whether it closes a path is not
+ * checked. */
+static int wall_fits(const qr_game *g, qr_orient o, int c, int r)
+{
+    const qr_masks *m = &g->masks;
+
+    if (g->walls[c][r] != QR_WALL_NONE)
+        return 0;
+    if (o == QR_WALL_H)
+        return !((m->h[c] | m->h[c + 2]) >> r & 1);
+    return !((m->v[c] << 1 | m->v[c] >> 1) >> r & 1);
+}
+
+/* Number of bits set in x, counted up to 3. */
+static int bits3(unsigned x)
+{
+    int n = 0;
+
+    while (x && n < 3) {
+        x &= x - 1;
+        n++;
+    }
+    return n;
+}
+
+/* Sets `out` to the walls that block every step of the player's shortest
+ * paths from one distance to the next (L from goal_layers for that player).
+ * Since a wall blocks two steps at most, such a step holds one or two; a
+ * wall that makes the path longer is nearly always one of these. */
+static void choke_walls(const qr_game *g, int player, const layers *L,
+                        wall_set *out)
+{
+    const qr_masks *m = &g->masks;
+    unsigned s[QR_BOARD_SIZE], t[QR_BOARD_SIZE], vs[QR_BOARD_SIZE], hs[QR_WALL_GRID];
+    unsigned e, any;
+    const unsigned *next;
+    qr_pos p = g->pawn[player];
+    int c, d, n, vc, hc, r;
+
+    for (c = 0; c < QR_WALL_GRID; c++)
+        out->h[c] = out->v[c] = 0;
+    if (L->pawn <= 0)
+        return;
+    for (c = 0; c < QR_BOARD_SIZE; c++)
+        s[c] = 0;
+    s[p.col] = 1u << p.row;
+    for (d = L->pawn; d > 0; d--) {
+        next = L->sq[d - 1];
+        /* vs[c] bit r: a step between rows r and r + 1 in column c;
+         * hs[c] bit r: a step between columns c and c + 1 in row r. */
+        for (c = 0; c < QR_BOARD_SIZE; c++)
+            t[c] = vs[c] = 0;
+        for (c = 0; c < QR_WALL_GRID; c++)
+            hs[c] = 0;
+        for (c = 0; c < QR_BOARD_SIZE; c++) {
+            if (!s[c])
+                continue;
+            e = s[c] & m->up[c] & next[c] >> 1;
+            t[c] |= e << 1;
+            vs[c] |= e;
+            e = s[c] >> 1 & m->up[c] & next[c];
+            t[c] |= e;
+            vs[c] |= e;
+            if (c < QR_BOARD_SIZE - 1) {
+                e = s[c] & m->side[c + 1] & next[c + 1];
+                t[c + 1] |= e;
+                hs[c] |= e;
+            }
+            if (c > 0) {
+                e = s[c] & m->side[c] & next[c - 1];
+                t[c - 1] |= e;
+                hs[c - 1] |= e;
+            }
+        }
+        n = 0;
+        vc = hc = -1;
+        any = 0;
+        for (c = 0; c < QR_BOARD_SIZE && n < 3; c++) {
+            if (vs[c]) {
+                n += bits3(vs[c]);
+                vc = vc < 0 ? c : vc;
+            }
+            if (c < QR_WALL_GRID && hs[c]) {
+                n += bits3(hs[c]);
+                hc = hc < 0 ? c : hc;
+            }
+        }
+        if (n == 1 && vc >= 0) {
+            for (r = 0; !(vs[vc] >> r & 1); r++)
+                ;
+            if (vc < QR_WALL_GRID)
+                out->h[vc] |= 1u << r;
+            if (vc > 0)
+                out->h[vc - 1] |= 1u << r;
+        } else if (n == 1) {
+            out->v[hc] |= (hs[hc] | hs[hc] >> 1) & SLOT_BITS;
+        } else if (n == 2 && vc >= 0 && hc < 0) {
+            /* Two steps up or down: one wall if side by side. */
+            if (vc < QR_WALL_GRID && vs[vc + 1] == vs[vc])
+                out->h[vc] |= vs[vc];
+        } else if (n == 2 && hc >= 0 && vc < 0) {
+            /* Two steps across: one wall if one above the other. */
+            e = hs[hc];
+            if ((e & (e >> 1)) != 0)
+                out->v[hc] |= e & e >> 1;
+        }
+        for (c = 0; c < QR_BOARD_SIZE; c++) {
+            s[c] = t[c];
+            any |= t[c];
+        }
+        if (!any)
+            break;
+    }
+}
+
+/* The most that one more wall, whoever places it, can add to the player's
+ * path (L from goal_layers for that player). g is changed and restored. */
+static int threat(qr_game *g, int player, const layers *L)
+{
+    wall_set cut;
+    qr_move m;
+    qr_pos from = g->pawn[g->to_move];
+    unsigned bits;
+    int c, r, d, best = 0;
+
+    if (L->pawn <= 0)
+        return 0;
+    choke_walls(g, player, L, &cut);
+    m.type = QR_MOVE_WALL;
+    for (c = 0; c < QR_WALL_GRID; c++) {
+        for (r = 0; r < QR_WALL_GRID; r++) {
+            for (m.orient = QR_WALL_H; m.orient <= QR_WALL_V; m.orient++) {
+                bits = m.orient == QR_WALL_H ? cut.h[c] : cut.v[c];
+                if (!(bits >> r & 1) || !wall_fits(g, m.orient, c, r))
+                    continue;
+                m.pos.col = c;
+                m.pos.row = r;
+                qr_apply_unchecked(g, &m);
+                d = qr_shortest_path(g, player);
+                qr_undo_move(g, &m, from);
+                if (d - L->pawn > best)
+                    best = d - L->pawn;
+            }
+        }
+    }
+    return best;
+}
+
 /* --- Moves and keys --- */
 
 /* Pawn moves are numbered by destination square, walls after them. */
@@ -257,17 +427,14 @@ static void key_toggle(hkey *k, int feature)
     k->b ^= mix32(2 * f + 0x79B9UL + 1);
 }
 
-static hkey key_of(const qr_game *g)
+/* Key of the walls on the board alone. */
+static hkey walls_key(const qr_game *g)
 {
     hkey k;
     qr_move m;
-    int p, c, r;
+    int c, r;
 
     k.a = k.b = 0;
-    for (p = 0; p < QR_NUM_PLAYERS; p++) {
-        key_toggle(&k, KEY_PAWN(p, g->pawn[p].col * QR_BOARD_SIZE + g->pawn[p].row));
-        key_toggle(&k, KEY_WALLS_LEFT(p, g->walls_left[p]));
-    }
     m.type = QR_MOVE_WALL;
     for (c = 0; c < QR_WALL_GRID; c++) {
         for (r = 0; r < QR_WALL_GRID; r++) {
@@ -278,6 +445,18 @@ static hkey key_of(const qr_game *g)
             m.orient = g->walls[c][r];
             key_toggle(&k, KEY_WALL(move_code(&m)));
         }
+    }
+    return k;
+}
+
+static hkey key_of(const qr_game *g)
+{
+    hkey k = walls_key(g);
+    int p;
+
+    for (p = 0; p < QR_NUM_PLAYERS; p++) {
+        key_toggle(&k, KEY_PAWN(p, g->pawn[p].col * QR_BOARD_SIZE + g->pawn[p].row));
+        key_toggle(&k, KEY_WALLS_LEFT(p, g->walls_left[p]));
     }
     if (g->to_move)
         key_toggle(&k, KEY_SIDE);
@@ -311,12 +490,18 @@ typedef struct {
 
 #define TT_SIZE (1UL << TT_BITS)
 
-static tt_entry      *table;
+#define TC_SIZE (1UL << TC_BITS)
+
+/* The threat cache: a player's threat depends only on the walls and that
+ * player's pawn, so entries never go stale and the cache is never cleared.
+ * An entry holds the threat + 1 as data, checked like the table's. */
+static tt_entry      *table, *threats;
 static pthread_once_t table_once = PTHREAD_ONCE_INIT;
 
 static void table_alloc(void)
 {
     table = calloc(TT_SIZE, sizeof *table);
+    threats = calloc(TC_SIZE, sizeof *threats);
 }
 
 typedef struct {
@@ -332,6 +517,7 @@ typedef struct {
     shared       *sh;
     qr_game       g;
     hkey          key;
+    hkey          wkey;         /* key of the walls alone */
     int           id;
     int           after_null;   /* the last move was a null move */
     long          nodes;
@@ -430,6 +616,12 @@ static void tt_store(const worker *w, int code, int depth, int bound, int score)
 
 /* --- Evaluation --- */
 
+/* Value of n walls in hand. */
+static int wall_value(int n)
+{
+    return EVAL_WALL * n - EVAL_CURVE * n * n / 10;
+}
+
 /* Value for the side to move (me) from both path lengths and the walls in
  * hand. */
 static int eval_terms(int dm, int dop, int wm, int wo)
@@ -440,24 +632,65 @@ static int eval_terms(int dm, int dop, int wm, int wo)
         return EVAL_RACE - EVAL_STEP * dm + 10 * dop;
     if (wm == 0 && dop < dm)
         return -EVAL_RACE + EVAL_STEP * dop - 10 * dm;
-    return EVAL_STEP * (dop - dm) + EVAL_WALL * (wm - wo) + EVAL_TEMPO;
+    return EVAL_STEP * (dop - dm) + EVAL_REL * 10 * (dop - dm) / (dop + dm + 1) +
+           wall_value(wm) - wall_value(wo) + EVAL_TEMPO;
 }
 
-static int evaluate(const qr_game *g)
+/* Threat terms for the side to move: tm is what one wall of mine can add
+ * to the opponent's path, to what one of the opponent's can add to mine
+ * (each 0 for a side without walls). */
+static int threat_terms(int tm, int to)
 {
-    int me = g->to_move, op = 1 - me;
+    return EVAL_THREAT * tm - EVAL_THREAT2 * to;
+}
 
-    return eval_terms(qr_shortest_path(g, me), qr_shortest_path(g, op),
-                      g->walls_left[me], g->walls_left[op]);
+/* threat, through the threat cache if w (for the key of its walls) is not
+ * NULL. */
+static int threat_of(qr_game *g, worker *w, int player)
+{
+    layers L;
+    hkey k;
+    tt_entry *e = NULL;
+    unsigned long data;
+    int v;
+
+    if (w && threats) {
+        k = w->wkey;
+        key_toggle(&k, KEY_PAWN(player, g->pawn[player].col * QR_BOARD_SIZE +
+                                        g->pawn[player].row));
+        e = &threats[k.a & (TC_SIZE - 1)];
+        data = qr_atomic_load_ulong(&e->data);
+        if (data && (qr_atomic_load_ulong(&e->check) ^ data) == k.b)
+            return (int)data - 1;
+    }
+    goal_layers(g, player, 0, &L);
+    v = threat(g, player, &L);
+    if (e) {
+        data = (unsigned long)v + 1;
+        qr_atomic_store_ulong(&e->data, data);
+        qr_atomic_store_ulong(&e->check, data ^ k.b);
+    }
+    return v;
+}
+
+/* Static value of g for the side to move; w (or NULL) supplies a cache. */
+static int evaluate(qr_game *g, worker *w)
+{
+    int me = g->to_move, op = 1 - me, wm = g->walls_left[me], wo = g->walls_left[op];
+
+    return eval_terms(qr_shortest_path(g, me), qr_shortest_path(g, op), wm, wo) +
+           threat_terms(wm > 0 ? threat_of(g, w, op) : 0,
+                        wo > 0 ? threat_of(g, w, me) : 0);
 }
 
 int qr_ai_evaluate(const qr_game *g, int player)
 {
+    qr_game t = *g;
     int v;
 
     if (g->winner >= 0)
         return g->winner == player ? WIN : -WIN;
-    v = evaluate(g);
+    v = evaluate(&t, NULL);
     return player == g->to_move ? v : -v;
 }
 
@@ -535,12 +768,16 @@ static void pick(smove *mv, int n, int i)
 static void make(worker *w, const qr_move *m)
 {
     key_move(&w->key, &w->g, m);
+    if (m->type == QR_MOVE_WALL)
+        key_toggle(&w->wkey, KEY_WALL(move_code(m)));
     qr_apply_unchecked(&w->g, m);
 }
 
 static void unmake(worker *w, const qr_move *m, qr_pos from, hkey key)
 {
     qr_undo_move(&w->g, m, from);
+    if (m->type == QR_MOVE_WALL)
+        key_toggle(&w->wkey, KEY_WALL(move_code(m)));
     w->key = key;
 }
 
@@ -558,19 +795,38 @@ static int frontier(worker *w, int alpha, int beta, int ply)
     const qr_move *m;
     int me = g->to_move, op = 1 - me;
     int wm = g->walls_left[me], wo = g->walls_left[op];
-    int dm, dop, n, i, v, d1, d2, bound;
+    int dm, dop, n, i, j, k, v, d1, d2, bound, t_me, t_op, pv[QR_MAX_PAWN_MOVES];
     int best = -INF, best_code = -1, alpha0 = alpha;
     qr_pos from = g->pawn[me];
 
     dm = goal_layers(g, me, 2, &lm);
     dop = wm > 0 ? goal_layers(g, op, 0, &lo) : qr_shortest_path(g, op);
+    /* In the children the opponent is to move: t_me is what one of its
+     * walls can add to my path, t_op what one of mine can add to its. */
+    t_op = wm > 0 ? threat_of(g, w, op) : 0;
     n = qr_pawn_moves(g, dest);
-    for (i = 0; i < n; i++) {
-        d1 = layer_dist(&lm, dest[i].col, dest[i].row);
-        v = -eval_terms(dop, d1, wo, wm);
+    /* The threat against me can only lower a pawn move's value, so pawn
+     * moves are taken best first without it, and the threat is measured
+     * only while a move can still beat the best. */
+    for (i = 0; i < n; i++)
+        pv[i] = -eval_terms(dop, layer_dist(&lm, dest[i].col, dest[i].row), wo, wm) -
+                threat_terms(0, t_op);
+    for (k = 0; k < n; k++) {
+        for (j = -1, i = 0; i < n; i++)
+            if (pv[i] > -INF && (j < 0 || pv[i] > pv[j]))
+                j = i;
+        if (pv[j] <= best)
+            break;
+        v = pv[j];
+        pv[j] = -INF;
+        if (wo > 0) {
+            g->pawn[me] = dest[j];
+            v -= EVAL_THREAT * threat_of(g, w, me);
+            g->pawn[me] = from;
+        }
         if (v > best) {
             best = v;
-            best_code = dest[i].col * QR_BOARD_SIZE + dest[i].row;
+            best_code = dest[j].col * QR_BOARD_SIZE + dest[j].row;
         }
     }
     w->nodes += n;
@@ -585,13 +841,23 @@ static int frontier(worker *w, int alpha, int beta, int ply)
                 continue;
             w->nodes++;
             qr_apply_unchecked(g, m);
+            key_toggle(&w->wkey, KEY_WALL(move_code(m)));
             d1 = qr_shortest_path(g, op);
-            /* The mover's path can only have grown, so dm gives a bound. */
-            v = -eval_terms(d1, dm, wo, wm - 1);
+            /* A wall that would fall short of alpha even with a threat of
+             * THREAT_CAP is not measured further. */
+            t_op = 0;
+            if (wm > 1 &&
+                -eval_terms(d1, dm, wo, wm - 1) - threat_terms(0, THREAT_CAP) > alpha)
+                t_op = threat_of(g, w, op);
+            /* The mover's path can only have grown, so dm, with no threat
+             * against it, gives a bound. */
+            v = -eval_terms(d1, dm, wo, wm - 1) - threat_terms(0, t_op);
             if (v > alpha) {
                 d2 = qr_shortest_path(g, me);
-                v = -eval_terms(d1, d2, wo, wm - 1);
+                t_me = wo > 0 ? threat_of(g, w, me) : 0;
+                v = -eval_terms(d1, d2, wo, wm - 1) - threat_terms(t_me, t_op);
             }
+            key_toggle(&w->wkey, KEY_WALL(move_code(m)));
             qr_undo_move(g, m, from);
             if (v > best) {
                 best = v;
@@ -640,7 +906,7 @@ static int search(worker *w, int depth, int alpha, int beta, int ply)
         }
     }
     if (depth <= 0 || ply >= MAX_PLY - 1)
-        return evaluate(g);
+        return evaluate(g, w);
 
     n = qr_pawn_moves(g, dest);
     for (i = 0; i < n; i++)
@@ -654,7 +920,7 @@ static int search(worker *w, int depth, int alpha, int beta, int ply)
      * real move does too. Never twice in a row or in the principal
      * variation. */
     if (depth >= NULL_MOVE_MIN_DEPTH && beta - alpha == 1 && !w->after_null &&
-        beta < MATE_BAND && evaluate(g) >= beta) {
+        beta < MATE_BAND && evaluate(g, w) >= beta) {
         r = depth >= 6 ? 3 : 2;
         g->to_move = 1 - g->to_move;
         key_toggle(&w->key, KEY_SIDE);
@@ -671,7 +937,7 @@ static int search(worker *w, int depth, int alpha, int beta, int ply)
 
     n = gen_moves(g, mv, 0);
     if (n == 0)
-        return evaluate(g);
+        return evaluate(g, w);
     score_moves(w, mv, n, tcode, ply);
 
     from = g->pawn[g->to_move];
@@ -877,6 +1143,7 @@ int qr_ai_choose_move(qr_ai *ai, const qr_game *g, qr_move *out)
         w->sh = &sh;
         w->g = *g;
         w->key = key_of(g);
+        w->wkey = walls_key(g);
         w->id = i;
         for (j = 0; j < MAX_PLY; j++)
             w->killers[j][0] = w->killers[j][1] = -1;
